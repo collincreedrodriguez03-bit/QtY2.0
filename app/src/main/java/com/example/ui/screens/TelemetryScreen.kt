@@ -77,7 +77,7 @@ fun TelemetryScreen(state: QtyUiState) {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = "Source TS: ${dateFormat.format(Date(tick.sourceTimestamp))}",
+                        text = "Source TS: ${tick.sourceTimestamp?.let { dateFormat.format(Date(it)) } ?: "UNAVAILABLE"}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

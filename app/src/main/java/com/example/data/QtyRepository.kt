@@ -5,6 +5,8 @@ import com.example.engine.HorizonPrediction
 import com.example.engine.PredictionEngine
 import com.example.engine.WalkForwardResult
 import com.example.engine.WalkForwardValidator
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.Types
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
@@ -15,38 +17,70 @@ class QtyRepository(context: Context) {
     val dao = database.qtyDao()
     private val predictionEngine = PredictionEngine()
     private val walkForwardValidator = WalkForwardValidator()
+    private val moshi = Moshi.Builder().build()
+    private val tradeListType = Types.newParameterizedType(List::class.java, BinanceTradeResponse::class.java)
+    private val tradeAdapter = moshi.adapter<List<BinanceTradeResponse>>(tradeListType)
 
     val recentTicks: Flow<List<PriceTickEntity>> = dao.getRecentTicks()
+    val recentIngestionEvents: Flow<List<IngestionEventEntity>> = dao.getRecentIngestionEvents()
     val recentPredictions: Flow<List<PredictionEntity>> = dao.getRecentPredictions()
     val recentAudits: Flow<List<WalkForwardAuditEntity>> = dao.getRecentAudits()
 
     suspend fun fetchAndProcessTick(): Pair<Double?, List<HorizonPrediction>> = withContext(Dispatchers.IO) {
         val localReceiptTimestamp = System.currentTimeMillis()
         val symbol = "BTCUSDT"
-        val datasetVersionIdentity = "v1.0-truthful"
+        val datasetVersionIdentity = "v2.0-truthful"
 
         try {
-            val response = BinanceClient.api.getBtcPrice(symbol)
-            val price = response.price.toDouble()
-            val volume = 0.0 // Authentic spot price ticker does not provide volume in /api/v3/ticker/price; keep 0.0 or authentic source if available
-            val sourceTimestamp = System.currentTimeMillis() // Exchange timestamp if provided, or receipt time
-            val rawPayload = "${response.symbol}-${response.price}-$sourceTimestamp"
+            val responseBody = BinanceClient.api.getRawTrades(symbol, 1)
+            val rawPayload = responseBody.string()
             val rawPayloadHash = sha256(rawPayload)
 
+            val trades = tradeAdapter.fromJson(rawPayload)
+            val trade = trades?.firstOrNull()
+
+            if (trade == null) {
+                // Ingestion failure: no fake tick, persist ingestion event
+                dao.insertIngestionEvent(
+                    IngestionEventEntity(
+                        timestamp = localReceiptTimestamp,
+                        symbol = symbol,
+                        status = "UNAVAILABLE",
+                        message = "Empty trade response from exchange"
+                    )
+                )
+                val predictions = predictionEngine.evaluateHorizons(emptyList())
+                return@withContext Pair(null, predictions)
+            }
+
+            // 1. Source timestamp from exchange (trade.time), NEVER substituted with local time
+            val sourceTimestamp: Long? = trade.time
+            // 2. Nullable price and volume, never 0.0
+            val price: Double? = trade.price.toDoubleOrNull()
+            val volume: Double? = trade.qty.toDoubleOrNull()
+            val eventId = trade.id.toString()
+
+            val dataQualityStatus = evaluateDataQuality(eventId, sourceTimestamp, price, volume)
+
             val tickEntity = PriceTickEntity(
-                source = "Binance_REST_Authentic",
+                source = "Binance_REST_Trades",
                 sourceTimestamp = sourceTimestamp,
                 localReceiptTimestamp = localReceiptTimestamp,
                 symbol = symbol,
                 price = price,
                 volume = volume,
+                eventId = eventId,
                 rawPayloadHash = rawPayloadHash,
                 datasetVersionIdentity = datasetVersionIdentity,
-                dataQualityStatus = "VALID"
+                dataQualityStatus = dataQualityStatus
             )
+
+            // Only persist valid/duplicate/out-of-order ticks as price ticks; invalid/missing data fails closed or logged
             dao.insertTick(tickEntity)
 
-            val predictions = predictionEngine.evaluateHorizons(emptyList())
+            val activePrice = if (dataQualityStatus == "VALID" || dataQualityStatus == "OUT_OF_ORDER" || dataQualityStatus == "DUPLICATE") price else null
+            val ticksForEngine = if (activePrice != null && sourceTimestamp != null) listOf(Pair(activePrice, sourceTimestamp)) else emptyList()
+            val predictions = predictionEngine.evaluateHorizons(ticksForEngine)
 
             predictions.forEach { pred ->
                 dao.insertPrediction(
@@ -60,30 +94,48 @@ class QtyRepository(context: Context) {
                         actualOutcome = null,
                         isCorrect = null,
                         uncertainty = pred.uncertainty,
-                        dataQualityStatus = "VALID"
+                        dataQualityStatus = if (ticksForEngine.isNotEmpty()) "VALID" else "INSUFFICIENT_DATA"
                     )
                 )
             }
 
-            Pair(price, predictions)
+            Pair(activePrice, predictions)
         } catch (e: Exception) {
-            // FAIL CLOSED: Never substitute fake market data on network/API failure.
-            val tickEntity = PriceTickEntity(
-                source = "Binance_REST_Authentic",
-                sourceTimestamp = localReceiptTimestamp,
-                localReceiptTimestamp = localReceiptTimestamp,
-                symbol = symbol,
-                price = 0.0,
-                volume = 0.0,
-                rawPayloadHash = "UNAVAILABLE",
-                datasetVersionIdentity = datasetVersionIdentity,
-                dataQualityStatus = "UNAVAILABLE"
+            // 3. Do not persist API failures as price ticks. Persist separate ingestion event.
+            dao.insertIngestionEvent(
+                IngestionEventEntity(
+                    timestamp = localReceiptTimestamp,
+                    symbol = symbol,
+                    status = "API_ERROR",
+                    message = e.localizedMessage ?: "Unknown network/API error"
+                )
             )
-            dao.insertTick(tickEntity)
 
             val predictions = predictionEngine.evaluateHorizons(emptyList())
             Pair(null, predictions)
         }
+    }
+
+    private suspend fun evaluateDataQuality(eventId: String, sourceTimestamp: Long?, price: Double?, volume: Double?): String {
+        if (sourceTimestamp == null || price == null || volume == null || price <= 0.0) {
+            return "INVALID"
+        }
+
+        // Check duplicate
+        val existingCount = dao.countTicksWithEventId(eventId)
+        if (existingCount > 0) {
+            return "DUPLICATE"
+        }
+
+        // Check ordering
+        val latest = dao.getLatestTick()
+        if (latest != null && latest.sourceTimestamp != null) {
+            if (sourceTimestamp < latest.sourceTimestamp || (latest.eventId != null && eventId.toLongOrNull() != null && latest.eventId.toLongOrNull() != null && eventId.toLong() <= latest.eventId.toLong())) {
+                return "OUT_OF_ORDER"
+            }
+        }
+
+        return "VALID"
     }
 
     suspend fun runWalkForwardAudit(horizon: String): WalkForwardResult = withContext(Dispatchers.IO) {

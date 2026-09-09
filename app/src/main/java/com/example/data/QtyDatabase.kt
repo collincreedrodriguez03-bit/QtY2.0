@@ -5,7 +5,7 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [PriceTickEntity::class, PredictionEntity::class, WalkForwardAuditEntity::class], version = 1, exportSchema = false)
+@Database(entities = [PriceTickEntity::class, IngestionEventEntity::class, PredictionEntity::class, WalkForwardAuditEntity::class], version = 2, exportSchema = false)
 abstract class QtyDatabase : RoomDatabase() {
     abstract fun qtyDao(): QtyDao
 
@@ -19,7 +19,9 @@ abstract class QtyDatabase : RoomDatabase() {
                     context.applicationContext,
                     QtyDatabase::class.java,
                     "qty_database"
-                ).build()
+                )
+                    .fallbackToDestructiveMigration()
+                    .build()
                 INSTANCE = instance
                 instance
             }

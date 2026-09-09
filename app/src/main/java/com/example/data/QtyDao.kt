@@ -11,8 +11,20 @@ interface QtyDao {
     @Query("SELECT * FROM price_ticks ORDER BY localReceiptTimestamp DESC LIMIT 100")
     fun getRecentTicks(): Flow<List<PriceTickEntity>>
 
+    @Query("SELECT * FROM price_ticks ORDER BY localReceiptTimestamp DESC LIMIT 1")
+    suspend fun getLatestTick(): PriceTickEntity?
+
+    @Query("SELECT COUNT(*) FROM price_ticks WHERE eventId = :eventId")
+    suspend fun countTicksWithEventId(eventId: String): Int
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTick(tick: PriceTickEntity)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertIngestionEvent(event: IngestionEventEntity)
+
+    @Query("SELECT * FROM ingestion_events ORDER BY timestamp DESC LIMIT 50")
+    fun getRecentIngestionEvents(): Flow<List<IngestionEventEntity>>
 
     @Query("SELECT * FROM predictions ORDER BY timestamp DESC LIMIT 50")
     fun getRecentPredictions(): Flow<List<PredictionEntity>>
