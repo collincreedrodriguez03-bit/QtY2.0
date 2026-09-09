@@ -401,7 +401,7 @@ class QtyTruthfulTest {
     @Test
     fun `test walk forward validation runs successfully with provenance and metrics`() {
         val validator = WalkForwardValidator()
-        val ticks = (1..60).map { i -> Pair(100.0 + i, i * 1000L) }
+        val ticks = (1..100).map { i -> Pair(100.0 + i, i * 1000L) }
         val result = validator.validate(ticks, "5s", "ds_test_v1")
 
         assertEquals("COMPLETED", result.status)
@@ -417,7 +417,7 @@ class QtyTruthfulTest {
     fun `test chronological partitions prevent future data leakage into training and calibration`() {
         val validator = WalkForwardValidator()
         // Ticks ordered strictly by timestamp
-        val ticks = (1..60).map { i -> Pair(100.0 + i, i * 1000L) }
+        val ticks = (1..100).map { i -> Pair(100.0 + i, i * 1000L) }
         val result = validator.validate(ticks, "5s", "ds_test_v1")
 
         assertEquals("COMPLETED", result.status)
@@ -432,12 +432,55 @@ class QtyTruthfulTest {
     @Test
     fun `test calibration data is separated from final oos evaluation`() {
         val validator = WalkForwardValidator()
-        val ticks = (1..60).map { i -> Pair(100.0 + i, i * 1000L) }
+        val ticks = (1..100).map { i -> Pair(100.0 + i, i * 1000L) }
         val result = validator.validate(ticks, "5s", "ds_test_v1")
 
         assertEquals("COMPLETED", result.status)
         // Calibration timestamps and OOS timestamps must be completely disjoint ranges
         assertTrue(result.calibrationEndTimestamp!! <= result.oosStartTimestamp!!)
+    }
+
+    @Test
+    fun `test samples without realizable future outcome are excluded from scored metrics`() {
+        val validator = WalkForwardValidator()
+        // Provide ticks where trailing ticks have no future outcome within horizon (e.g. truncated at end)
+        val ticks = (1..50).map { i -> Pair(100.0 + i, i * 1000L) }
+        val result = validator.validate(ticks, "15m", "ds_test_v1") // 15m horizon on 50s data has no future outcomes
+
+        // Should be UNAVAILABLE due to insufficient realizable samples
+        assertEquals("UNAVAILABLE", result.status)
+        assertNull(result.sampleCount)
+        assertNull(result.oosWinRate)
+    }
+
+    @Test
+    fun `test trained prediction engine enforces strict time boundary at T`() {
+        val engine = TrainedPredictionEngine()
+        val trainer = ModelTrainer()
+        val ticks = (1..30).map { i -> Pair(100.0 + i, i * 1000L) }
+        val trainRes = trainer.trainModel(ticks.subList(0, 15), "5s", "v1")
+        assertTrue(trainRes.success)
+
+        val spec = ModelSpecifications.getSpecification("5s")!!
+        val model = TrainedModelEntity(
+            horizon = "5s",
+            trainingDatasetIdentity = "v1",
+            featureSetVersion = spec.featureSetVersion,
+            labelVersion = spec.labelVersion,
+            trainingStartTime = 1000L,
+            trainingEndTime = 15000L,
+            parametersJson = trainer.serializeParameters(trainRes.parameters!!),
+            parametersVersion = spec.parametersVersion,
+            sampleCount = 10,
+            status = "TRAINED"
+        )
+
+        // Evaluate at inference timestamp T = 10000L, passing ONLY ticks <= 10000L
+        val inferenceTimestamp = 10000L
+        val strictTicks = ticks.filter { it.second <= inferenceTimestamp }
+        val prediction = engine.evaluateHorizon(strictTicks, inferenceTimestamp, model)
+
+        assertEquals("COMPLETED", prediction.status)
     }
 }
 

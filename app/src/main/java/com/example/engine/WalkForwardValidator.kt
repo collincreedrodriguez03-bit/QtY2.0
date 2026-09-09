@@ -124,25 +124,24 @@ class WalkForwardValidator(
             status = "TRAINED"
         )
 
-        // Calibration evaluation (using calibration split without updating model parameters - strictly separated)
+        // Calibration evaluation: strictly receive ONLY observations with timestamp <= T
         var totalCalibEval = 0
         var calibSquaredErrorSum = 0.0
         for (i in 4 until calibTicks.size) {
             val t = calibTicks[i].second
-            val prediction = predictionEngine.evaluateHorizon(sortedTicks, t, storedModel)
-            if (prediction.status == "COMPLETED" && prediction.probability != null) {
-                val futureTick = sortedTicks.firstOrNull { it.second >= t + horizonMs }
-                if (futureTick != null) {
-                    val actual = if (futureTick.first > calibTicks[i].first) 1.0 else 0.0
-                    val err = prediction.probability - actual
-                    calibSquaredErrorSum += err * err
-                    totalCalibEval++
-                }
+            val ticksAtT = sortedTicks.filter { it.second <= t }
+            val prediction = predictionEngine.evaluateHorizon(ticksAtT, t, storedModel)
+            val futureTick = sortedTicks.firstOrNull { it.second >= t + horizonMs }
+            if (prediction.status == "COMPLETED" && prediction.probability != null && futureTick != null) {
+                val actual = if (futureTick.first > calibTicks[i].first) 1.0 else 0.0
+                val err = prediction.probability - actual
+                calibSquaredErrorSum += err * err
+                totalCalibEval++
             }
         }
         val calibrationError = if (totalCalibEval > 0) kotlin.math.sqrt(calibSquaredErrorSum / totalCalibEval) else null
 
-        // Final OOS Test Evaluation (strictly separated from calibration)
+        // Final OOS Test Evaluation: strictly receive ONLY observations with timestamp <= T, and require realizable future label
         var attemptedOos = 0
         var validOos = 0
         var abstentions = 0
@@ -156,34 +155,31 @@ class WalkForwardValidator(
         for (i in 4 until oosTicks.size) {
             val t = oosTicks[i].second
             attemptedOos++
-            val prediction = predictionEngine.evaluateHorizon(sortedTicks, t, storedModel)
-            if (prediction.status == "NO_PREDICTION") {
+            val ticksAtT = sortedTicks.filter { it.second <= t }
+            val prediction = predictionEngine.evaluateHorizon(ticksAtT, t, storedModel)
+            val futureTick = sortedTicks.firstOrNull { it.second >= t + horizonMs }
+
+            // Count an OOS sample as valid only after BOTH a prediction exists AND a valid realized future outcome exists
+            if (prediction.status != "COMPLETED" || prediction.probability == null || prediction.direction == null || futureTick == null) {
                 abstentions++
                 continue
             }
 
-            if (prediction.status == "COMPLETED" && prediction.probability != null && prediction.direction != null) {
-                validOos++
-                val futureTick = sortedTicks.firstOrNull { it.second >= t + horizonMs }
-                if (futureTick != null) {
-                    val actualUp = futureTick.first > oosTicks[i].first
-                    val actualLabel = if (actualUp) 1.0 else 0.0
-                    val predictedUp = prediction.direction == "UP"
+            validOos++
+            val actualUp = futureTick.first > oosTicks[i].first
+            val actualLabel = if (actualUp) 1.0 else 0.0
+            val predictedUp = prediction.direction == "UP"
 
-                    val bErr = prediction.probability - actualLabel
-                    brierSquaredErrorSum += bErr * bErr
+            val bErr = prediction.probability - actualLabel
+            brierSquaredErrorSum += bErr * bErr
 
-                    val isCorrect = predictedUp == actualUp
-                    if (isCorrect) correctPredictions++
+            val isCorrect = predictedUp == actualUp
+            if (isCorrect) correctPredictions++
 
-                    if (predictedUp && actualUp) tp++
-                    else if (predictedUp && !actualUp) fp++
-                    else if (!predictedUp && !actualUp) tn++
-                    else if (!predictedUp && actualUp) fn++
-                }
-            } else {
-                abstentions++
-            }
+            if (predictedUp && actualUp) tp++
+            else if (predictedUp && !actualUp) fp++
+            else if (!predictedUp && !actualUp) tn++
+            else if (!predictedUp && actualUp) fn++
         }
 
         if (validOos < config.minOosSamples) {
