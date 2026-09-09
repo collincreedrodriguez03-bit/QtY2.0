@@ -8,7 +8,7 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface QtyDao {
-    @Query("SELECT * FROM price_ticks ORDER BY timestamp DESC LIMIT 100")
+    @Query("SELECT * FROM price_ticks ORDER BY localReceiptTimestamp DESC LIMIT 100")
     fun getRecentTicks(): Flow<List<PriceTickEntity>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

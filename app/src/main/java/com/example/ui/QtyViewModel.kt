@@ -17,7 +17,7 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 data class QtyUiState(
-    val currentBtcPrice: Double = 95000.0,
+    val currentBtcPrice: Double? = null,
     val isLivePolling: Boolean = false,
     val horizons: List<HorizonPrediction> = emptyList(),
     val recentTicks: List<PriceTickEntity> = emptyList(),
@@ -64,7 +64,7 @@ class QtyViewModel(application: Application) : AndroidViewModel(application) {
         pollingJob = viewModelScope.launch {
             while (_uiState.value.isLivePolling) {
                 runSingleTickUpdate()
-                delay(3000) // Poll every 3 seconds
+                delay(3000)
             }
         }
     }
@@ -77,11 +77,11 @@ class QtyViewModel(application: Application) : AndroidViewModel(application) {
                     it.copy(
                         currentBtcPrice = price,
                         horizons = preds,
-                        errorMessage = null
+                        errorMessage = if (price == null) "API Telemetry Unavailable - Failed Closed." else null
                     )
                 }
             } catch (e: Exception) {
-                _uiState.update { it.copy(errorMessage = e.localizedMessage) }
+                _uiState.update { it.copy(errorMessage = e.localizedMessage, currentBtcPrice = null) }
             }
         }
     }

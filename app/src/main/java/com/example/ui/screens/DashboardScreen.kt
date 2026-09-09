@@ -17,7 +17,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.ui.QtyUiState
 
 @Composable
@@ -34,7 +33,6 @@ fun DashboardScreen(
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
-            // Header / Price Card
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(20.dp),
@@ -48,16 +46,16 @@ fun DashboardScreen(
                     ) {
                         Column {
                             Text(
-                                text = "BTCUSDT Telemetry",
+                                text = "BTCUSDT Telemetry (Truthful Foundation)",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = "$%,.2f".format(state.currentBtcPrice),
+                                text = if (state.currentBtcPrice != null) "$%,.2f".format(state.currentBtcPrice) else "UNAVAILABLE (Fail Closed)",
                                 style = MaterialTheme.typography.headlineLarge,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
+                                color = if (state.currentBtcPrice != null) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.error
                             )
                         }
                         
@@ -81,6 +79,15 @@ fun DashboardScreen(
                         }
                     }
 
+                    if (state.errorMessage != null) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = state.errorMessage,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+
                     Spacer(modifier = Modifier.height(12.dp))
                     LinearProgressIndicator(
                         modifier = Modifier
@@ -92,7 +99,7 @@ fun DashboardScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Objective: 90%+ validated win rate across 5s–15m independent horizons",
+                        text = "Phase 1: Strict Provenance & Fail-Closed Validation Active",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -110,9 +117,6 @@ fun DashboardScreen(
         }
 
         items(state.horizons) { pred ->
-            val isUp = pred.direction == "UP"
-            val badgeColor = if (isUp) Color(0xFF2E7D32) else Color(0xFFC62828)
-
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
@@ -129,51 +133,29 @@ fun DashboardScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
-                                color = badgeColor.copy(alpha = 0.15f)
+                                color = MaterialTheme.colorScheme.surfaceVariant
                             ) {
                                 Text(
                                     text = pred.horizon,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                     style = MaterialTheme.typography.labelLarge,
-                                    color = badgeColor,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
                             Spacer(modifier = Modifier.width(12.dp))
                             Text(
-                                text = pred.direction,
+                                text = pred.status,
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = badgeColor
+                                color = MaterialTheme.colorScheme.error
                             )
                         }
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "Target: $%,.2f  |  ±$%.2f Uncert".format(pred.targetPrice, pred.uncertainty),
+                            text = "No trained model or invented probabilities exist yet. Awaiting validated model pipeline.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                    }
-
-                    Column(horizontalAlignment = Alignment.End) {
-                        Text(
-                            text = "%.1f%% Conf".format(pred.confidence * 100),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = if (pred.isSelectiveHighWinRate) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = if (pred.isSelectiveHighWinRate) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant
-                        ) {
-                            Text(
-                                text = if (pred.isSelectiveHighWinRate) "90%+ Target Set" else "Standard Sub",
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (pred.isSelectiveHighWinRate) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
                     }
                 }
             }

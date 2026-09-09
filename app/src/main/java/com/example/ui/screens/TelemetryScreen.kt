@@ -12,7 +12,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.ui.QtyUiState
 import java.text.SimpleDateFormat
 import java.util.*
@@ -30,14 +29,14 @@ fun TelemetryScreen(state: QtyUiState) {
     ) {
         item {
             Text(
-                text = "Raw Telemetry & Cryptographic Provenance",
+                text = "Raw Telemetry & Strict Provenance Audit",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onBackground
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "Strict timestamp-correct data stream from Binance public API with SHA-256 provenance hashes ensuring zero data fabrication.",
+                text = "Preserving source, source timestamp, local receipt timestamp, symbol, raw payload hash, dataset version identity, and data quality status.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -55,23 +54,40 @@ fun TelemetryScreen(state: QtyUiState) {
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "BTCUSDT: $%,.2f".format(tick.price),
+                            text = "${tick.symbol}: $%,.2f".format(tick.price),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
-                        Text(
-                            text = dateFormat.format(Date(tick.timestamp)),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = if (tick.dataQualityStatus == "VALID") MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.errorContainer
+                        ) {
+                            Text(
+                                text = tick.dataQualityStatus,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (tick.dataQualityStatus == "VALID") MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onErrorContainer
+                            )
+                        }
                     }
+
                     Text(
-                        text = "Source: ${tick.source}  |  Volume: %.2f".format(tick.volume),
+                        text = "Source: ${tick.source} | Version: ${tick.datasetVersionIdentity}",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = "SHA-256: ${tick.provenanceHash}",
+                        text = "Source TS: ${dateFormat.format(Date(tick.sourceTimestamp))}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "Receipt TS: ${dateFormat.format(Date(tick.localReceiptTimestamp))}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Text(
+                        text = "Payload Hash: ${tick.rawPayloadHash}",
                         style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace),
                         color = MaterialTheme.colorScheme.primary
                     )

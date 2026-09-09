@@ -32,14 +32,14 @@ fun WalkForwardScreen(
             ) {
                 Column(modifier = Modifier.padding(20.dp)) {
                     Text(
-                        text = "Rigorous Walk-Forward & OOS Validation",
+                        text = "Rigorous Walk-Forward & OOS Validation (Phase 1)",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Out-of-sample rolling fold validation ensuring zero lookahead bias, strict time-series provenance, and Expected Calibration Error (ECE) minimization.",
+                        text = "Zero-lookahead OOS validation. Fabricated metrics and fixed fallback clamps have been purged. Audit requires authentic historical dataset.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -80,19 +80,19 @@ fun WalkForwardScreen(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Text(
-                                text = "Audit Results: ${audit.horizon} Horizon",
+                                text = "Audit Status: ${audit.horizon}",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold
                             )
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer
+                                color = MaterialTheme.colorScheme.errorContainer
                             ) {
                                 Text(
-                                    text = "%.1f%% OOS Win Rate".format(audit.oosWinRate * 100),
+                                    text = audit.status,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                     style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    color = MaterialTheme.colorScheme.onErrorContainer,
                                     fontWeight = FontWeight.Bold
                                 )
                             }
@@ -100,31 +100,9 @@ fun WalkForwardScreen(
 
                         Divider()
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("Total Validated Folds:", style = MaterialTheme.typography.bodyMedium)
-                            Text("${audit.totalValidated}", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                        }
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            Text("Expected Calibration Error (ECE):", style = MaterialTheme.typography.bodyMedium)
-                            Text("%.4f".format(audit.calibrationError), fontWeight = FontWeight.Bold, style = MaterialTheme.typography.bodyMedium)
-                        }
-
-                        Spacer(modifier = Modifier.height(4.dp))
                         Text(
-                            text = "Feature Importance & Independent Information:",
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = FontWeight.Bold
-                        )
-                        Text(
-                            text = audit.featureImportanceMap.toString(),
-                            style = MaterialTheme.typography.bodySmall,
+                            text = "Result: ${audit.status}. No fabricated validation metrics permitted until authentic historical test bed is established.",
+                            style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }

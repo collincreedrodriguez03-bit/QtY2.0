@@ -20,78 +20,84 @@ class QtyRepository(context: Context) {
     val recentPredictions: Flow<List<PredictionEntity>> = dao.getRecentPredictions()
     val recentAudits: Flow<List<WalkForwardAuditEntity>> = dao.getRecentAudits()
 
-    suspend fun fetchAndProcessTick(): Pair<Double, List<HorizonPrediction>> = withContext(Dispatchers.IO) {
-        var price = 95000.0
-        var volume = 12.4
+    suspend fun fetchAndProcessTick(): Pair<Double?, List<HorizonPrediction>> = withContext(Dispatchers.IO) {
+        val localReceiptTimestamp = System.currentTimeMillis()
+        val symbol = "BTCUSDT"
+        val datasetVersionIdentity = "v1.0-truthful"
+
         try {
-            val ticker = BinanceClient.api.getBtcPrice("BTCUSDT")
-            price = ticker.price.toDouble()
-            volume = 10.0 + (Math.random() * 5.0)
-        } catch (e: Exception) {
-            // Fallback simulation based on recent local ticks if offline
-            price = 95000.0 + (Math.sin(System.currentTimeMillis() / 1000.0) * 120.0) + ((Math.random() - 0.5) * 15.0)
-        }
+            val response = BinanceClient.api.getBtcPrice(symbol)
+            val price = response.price.toDouble()
+            val volume = 0.0 // Authentic spot price ticker does not provide volume in /api/v3/ticker/price; keep 0.0 or authentic source if available
+            val sourceTimestamp = System.currentTimeMillis() // Exchange timestamp if provided, or receipt time
+            val rawPayload = "${response.symbol}-${response.price}-$sourceTimestamp"
+            val rawPayloadHash = sha256(rawPayload)
 
-        val timestamp = System.currentTimeMillis()
-        val provenanceHash = sha256("$timestamp-$price-$volume")
-
-        val tickEntity = PriceTickEntity(
-            timestamp = timestamp,
-            price = price,
-            volume = volume,
-            source = "Binance_REST_Authentic",
-            provenanceHash = provenanceHash
-        )
-        dao.insertTick(tickEntity)
-
-        // Get last 30 prices from room or memory
-        val prices = mutableListOf<Double>()
-        for (i in 0..25) {
-            prices.add(price - (i * 2.0) + (Math.sin(i.toDouble()) * 10.0))
-        }
-        val volumes = mutableListOf<Double>()
-        for (i in 0..25) {
-            volumes.add(volume)
-        }
-
-        val predictions = predictionEngine.evaluateHorizons(prices, volumes)
-
-        // Save predictions
-        predictions.forEach { pred ->
-            dao.insertPrediction(
-                PredictionEntity(
-                    timestamp = timestamp,
-                    horizon = pred.horizon,
-                    predictedDirection = pred.direction,
-                    confidence = pred.confidence,
-                    targetPrice = pred.targetPrice,
-                    actualOutcome = null,
-                    isCorrect = null,
-                    uncertainty = pred.uncertainty
-                )
+            val tickEntity = PriceTickEntity(
+                source = "Binance_REST_Authentic",
+                sourceTimestamp = sourceTimestamp,
+                localReceiptTimestamp = localReceiptTimestamp,
+                symbol = symbol,
+                price = price,
+                volume = volume,
+                rawPayloadHash = rawPayloadHash,
+                datasetVersionIdentity = datasetVersionIdentity,
+                dataQualityStatus = "VALID"
             )
-        }
+            dao.insertTick(tickEntity)
 
-        Pair(price, predictions)
+            val predictions = predictionEngine.evaluateHorizons(emptyList())
+
+            predictions.forEach { pred ->
+                dao.insertPrediction(
+                    PredictionEntity(
+                        timestamp = localReceiptTimestamp,
+                        horizon = pred.horizon,
+                        status = pred.status,
+                        predictedDirection = pred.direction,
+                        confidence = pred.confidence,
+                        targetPrice = pred.targetPrice,
+                        actualOutcome = null,
+                        isCorrect = null,
+                        uncertainty = pred.uncertainty,
+                        dataQualityStatus = "VALID"
+                    )
+                )
+            }
+
+            Pair(price, predictions)
+        } catch (e: Exception) {
+            // FAIL CLOSED: Never substitute fake market data on network/API failure.
+            val tickEntity = PriceTickEntity(
+                source = "Binance_REST_Authentic",
+                sourceTimestamp = localReceiptTimestamp,
+                localReceiptTimestamp = localReceiptTimestamp,
+                symbol = symbol,
+                price = 0.0,
+                volume = 0.0,
+                rawPayloadHash = "UNAVAILABLE",
+                datasetVersionIdentity = datasetVersionIdentity,
+                dataQualityStatus = "UNAVAILABLE"
+            )
+            dao.insertTick(tickEntity)
+
+            val predictions = predictionEngine.evaluateHorizons(emptyList())
+            Pair(null, predictions)
+        }
     }
 
     suspend fun runWalkForwardAudit(horizon: String): WalkForwardResult = withContext(Dispatchers.IO) {
-        val dummyPrices = mutableListOf<Double>()
-        var p = 95000.0
-        for (i in 0..50) {
-            p += (Math.random() - 0.48) * 30.0
-            dummyPrices.add(p)
-        }
-        val result = walkForwardValidator.validate(dummyPrices, horizon)
-        
+        val result = walkForwardValidator.validate(emptyList(), horizon)
         dao.insertAudit(
             WalkForwardAuditEntity(
                 timestamp = System.currentTimeMillis(),
                 horizon = horizon,
+                status = result.status,
                 outOfSampleWinRate = result.oosWinRate,
                 totalValidated = result.totalValidated,
                 calibrationError = result.calibrationError,
-                featureRankJson = result.featureImportanceMap.toString()
+                featureRankJson = null,
+                dataQualityStatus = "UNAVAILABLE"
             )
         )
         result
