@@ -27,6 +27,30 @@ data class IngestionEventEntity(
     val message: String?
 )
 
+@Entity(tableName = "feature_records")
+data class FeatureRecordEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val featureName: String,
+    val timestamp: Long,
+    val lookbackWindowMs: Long,
+    val sourceDataRangeStart: Long?,
+    val sourceDataRangeEnd: Long?,
+    val sampleCount: Int,
+    val validityStatus: String, // "VALID", "INVALID", "INSUFFICIENT_DATA"
+    val value: Double?
+)
+
+@Entity(tableName = "feature_research_evaluations")
+data class FeatureResearchEvaluationEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val featureName: String,
+    val evaluationTimestamp: Long,
+    val horizon: String,
+    val sampleSize: Int,
+    val incrementalInformationMetric: Double?, // Information Coefficient / correlation
+    val evaluationStatus: String // "COMPLETED", "INSUFFICIENT_DATA"
+)
+
 @Entity(tableName = "predictions")
 data class PredictionEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,

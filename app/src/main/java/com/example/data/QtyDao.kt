@@ -26,6 +26,18 @@ interface QtyDao {
     @Query("SELECT * FROM ingestion_events ORDER BY timestamp DESC LIMIT 50")
     fun getRecentIngestionEvents(): Flow<List<IngestionEventEntity>>
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertFeatureRecord(record: FeatureRecordEntity)
+
+    @Query("SELECT * FROM feature_records ORDER BY timestamp DESC LIMIT 100")
+    fun getRecentFeatureRecords(): Flow<List<FeatureRecordEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertFeatureResearchEvaluation(evaluation: FeatureResearchEvaluationEntity)
+
+    @Query("SELECT * FROM feature_research_evaluations ORDER BY evaluationTimestamp DESC LIMIT 50")
+    fun getRecentFeatureResearchEvaluations(): Flow<List<FeatureResearchEvaluationEntity>>
+
     @Query("SELECT * FROM predictions ORDER BY timestamp DESC LIMIT 50")
     fun getRecentPredictions(): Flow<List<PredictionEntity>>
 

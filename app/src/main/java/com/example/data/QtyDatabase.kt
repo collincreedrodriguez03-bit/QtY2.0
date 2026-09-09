@@ -5,7 +5,18 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 
-@Database(entities = [PriceTickEntity::class, IngestionEventEntity::class, PredictionEntity::class, WalkForwardAuditEntity::class], version = 2, exportSchema = false)
+@Database(
+    entities = [
+        PriceTickEntity::class,
+        IngestionEventEntity::class,
+        FeatureRecordEntity::class,
+        FeatureResearchEvaluationEntity::class,
+        PredictionEntity::class,
+        WalkForwardAuditEntity::class
+    ],
+    version = 3,
+    exportSchema = false
+)
 abstract class QtyDatabase : RoomDatabase() {
     abstract fun qtyDao(): QtyDao
 

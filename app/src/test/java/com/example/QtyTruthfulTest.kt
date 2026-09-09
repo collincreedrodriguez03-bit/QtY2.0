@@ -4,9 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.*
-import com.example.engine.FeatureExtractor
-import com.example.engine.PredictionEngine
-import com.example.engine.WalkForwardValidator
+import com.example.engine.*
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.*
@@ -185,5 +183,87 @@ class QtyTruthfulTest {
         val result = validator.validate(emptyList(), "5s")
         assertEquals("UNAVAILABLE", result.status)
         assertNull(result.oosWinRate)
+    }
+
+    @Test
+    fun `test no future observations enter feature calculation (no lookahead)`() {
+        val pipeline = FeatureResearchPipeline()
+        val ticks = listOf(
+            Pair(100.0, 1000L),
+            Pair(101.0, 2000L),
+            Pair(105.0, 5000L) // Future tick
+        )
+        val spec = FeatureCandidateSpec("log_return_1s", 5000L)
+        val result = pipeline.extractFeature(ticks, 2000L, spec)
+
+        assertEquals(2, result.sampleCount)
+        assertEquals(2000L, result.sourceDataRangeEnd)
+    }
+
+    @Test
+    fun `test insufficient history fails closed`() {
+        val pipeline = FeatureResearchPipeline()
+        val ticks = listOf(Pair(100.0, 1000L))
+        val spec = FeatureCandidateSpec("log_return_1s", 5000L)
+        val result = pipeline.extractFeature(ticks, 2000L, spec)
+
+        assertEquals("INSUFFICIENT_DATA", result.validityStatus)
+        assertNull(result.value)
+    }
+
+    @Test
+    fun `test feature timestamps and lookback ranges are correct`() {
+        val pipeline = FeatureResearchPipeline()
+        val ticks = listOf(
+            Pair(100.0, 1000L),
+            Pair(101.0, 2000L),
+            Pair(102.0, 3000L)
+        )
+        val featureTimestamp = 3000L
+        val lookbackMs = 2000L
+        val spec = FeatureCandidateSpec("trade_arrival_rate", lookbackMs)
+        val result = pipeline.extractFeature(ticks, featureTimestamp, spec)
+
+        assertEquals(3000L, result.timestamp)
+        assertEquals(2000L, result.lookbackWindowMs)
+        assertEquals(1000L, result.sourceDataRangeStart)
+        assertEquals(3000L, result.sourceDataRangeEnd)
+        assertEquals(3, result.sampleCount)
+        assertEquals("VALID", result.validityStatus)
+    }
+
+    @Test
+    fun `test calculations are deterministic for identical authentic input`() {
+        val pipeline = FeatureResearchPipeline()
+        val ticks = listOf(
+            Pair(100.0, 1000L),
+            Pair(101.0, 2000L),
+            Pair(102.0, 3000L),
+            Pair(103.0, 4000L)
+        )
+        val spec = FeatureCandidateSpec("log_return_3s", 3000L)
+        val res1 = pipeline.extractFeature(ticks, 4000L, spec)
+        val res2 = pipeline.extractFeature(ticks, 4000L, spec)
+
+        assertEquals(res1.value, res2.value)
+        assertEquals(res1.validityStatus, res2.validityStatus)
+        assertEquals(res1.sampleCount, res2.sampleCount)
+    }
+
+    @Test
+    fun `test feature research evaluator measures incremental info without leakage`() {
+        val evaluator = FeatureResearchEvaluator()
+        val pairs = listOf(
+            Pair(0.1, 0.02),
+            Pair(0.2, 0.03),
+            Pair(0.3, 0.04),
+            Pair(0.4, 0.05),
+            Pair(0.5, 0.06)
+        )
+        val result = evaluator.evaluateIncrementalInformation("test_feature", 1000L, "5s", pairs)
+
+        assertEquals("COMPLETED", result.evaluationStatus)
+        assertNotNull(result.incrementalInformationMetric)
+        assertTrue(result.incrementalInformationMetric != null && result.incrementalInformationMetric > 0.9)
     }
 }
