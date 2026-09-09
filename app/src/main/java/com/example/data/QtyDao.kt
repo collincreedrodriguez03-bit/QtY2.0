@@ -11,6 +11,9 @@ interface QtyDao {
     @Query("SELECT * FROM price_ticks ORDER BY localReceiptTimestamp DESC LIMIT 100")
     fun getRecentTicks(): Flow<List<PriceTickEntity>>
 
+    @Query("SELECT * FROM price_ticks ORDER BY localReceiptTimestamp ASC")
+    suspend fun getAllTicksList(): List<PriceTickEntity>
+
     @Query("SELECT * FROM price_ticks ORDER BY localReceiptTimestamp DESC LIMIT 1")
     suspend fun getLatestTick(): PriceTickEntity?
 

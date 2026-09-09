@@ -139,17 +139,43 @@ class QtyRepository(context: Context) {
     }
 
     suspend fun runWalkForwardAudit(horizon: String): WalkForwardResult = withContext(Dispatchers.IO) {
-        val result = walkForwardValidator.validate(emptyList(), horizon)
+        val tickEntities = dao.getAllTicksList()
+        val pairs = tickEntities.mapNotNull { tick ->
+            if (tick.price != null && tick.sourceTimestamp != null) {
+                Pair(tick.price, tick.sourceTimestamp)
+            } else if (tick.price != null) {
+                Pair(tick.price, tick.localReceiptTimestamp)
+            } else {
+                null
+            }
+        }
+        val result = walkForwardValidator.validate(pairs, horizon, "db_live_dataset")
         dao.insertAudit(
             WalkForwardAuditEntity(
                 timestamp = System.currentTimeMillis(),
                 horizon = horizon,
                 status = result.status,
-                outOfSampleWinRate = result.oosWinRate,
-                totalValidated = result.totalValidated,
+                trainingDatasetIdentity = result.trainingDatasetIdentity,
+                featureSetVersion = result.featureSetVersion,
+                labelVersion = result.labelVersion,
+                configVersion = result.configVersion,
+                trainStartTimestamp = result.trainStartTimestamp,
+                trainEndTimestamp = result.trainEndTimestamp,
+                calibrationStartTimestamp = result.calibrationStartTimestamp,
+                calibrationEndTimestamp = result.calibrationEndTimestamp,
+                oosStartTimestamp = result.oosStartTimestamp,
+                oosEndTimestamp = result.oosEndTimestamp,
+                sampleCount = result.sampleCount,
+                oosWinRate = result.oosWinRate,
+                coverage = result.coverage,
+                abstentionRate = result.abstentionRate,
+                truePositives = result.truePositives,
+                falsePositives = result.falsePositives,
+                trueNegatives = result.trueNegatives,
+                falseNegatives = result.falseNegatives,
+                brierScore = result.brierScore,
                 calibrationError = result.calibrationError,
-                featureRankJson = null,
-                dataQualityStatus = "UNAVAILABLE"
+                dataQualityStatus = if (tickEntities.isNotEmpty()) "VALID" else "UNAVAILABLE"
             )
         )
         result

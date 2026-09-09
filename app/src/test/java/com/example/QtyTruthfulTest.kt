@@ -397,6 +397,48 @@ class QtyTruthfulTest {
         // Since no tick exists at >= 10000L, dataset should be empty (no lookahead / fake future)
         assertTrue(dataset.isEmpty())
     }
+
+    @Test
+    fun `test walk forward validation runs successfully with provenance and metrics`() {
+        val validator = WalkForwardValidator()
+        val ticks = (1..60).map { i -> Pair(100.0 + i, i * 1000L) }
+        val result = validator.validate(ticks, "5s", "ds_test_v1")
+
+        assertEquals("COMPLETED", result.status)
+        assertEquals("5s", result.horizon)
+        assertEquals("ds_test_v1", result.trainingDatasetIdentity)
+        assertNotNull(result.sampleCount)
+        assertNotNull(result.oosWinRate)
+        assertNotNull(result.brierScore)
+        assertNotNull(result.calibrationError)
+    }
+
+    @Test
+    fun `test chronological partitions prevent future data leakage into training and calibration`() {
+        val validator = WalkForwardValidator()
+        // Ticks ordered strictly by timestamp
+        val ticks = (1..60).map { i -> Pair(100.0 + i, i * 1000L) }
+        val result = validator.validate(ticks, "5s", "ds_test_v1")
+
+        assertEquals("COMPLETED", result.status)
+        // Verify train start < train end <= calib start < calib end <= oos start < oos end
+        assertTrue(result.trainStartTimestamp!! < result.trainEndTimestamp!!)
+        assertTrue(result.trainEndTimestamp!! <= result.calibrationStartTimestamp!!)
+        assertTrue(result.calibrationStartTimestamp!! < result.calibrationEndTimestamp!!)
+        assertTrue(result.calibrationEndTimestamp!! <= result.oosStartTimestamp!!)
+        assertTrue(result.oosStartTimestamp!! < result.oosEndTimestamp!!)
+    }
+
+    @Test
+    fun `test calibration data is separated from final oos evaluation`() {
+        val validator = WalkForwardValidator()
+        val ticks = (1..60).map { i -> Pair(100.0 + i, i * 1000L) }
+        val result = validator.validate(ticks, "5s", "ds_test_v1")
+
+        assertEquals("COMPLETED", result.status)
+        // Calibration timestamps and OOS timestamps must be completely disjoint ranges
+        assertTrue(result.calibrationEndTimestamp!! <= result.oosStartTimestamp!!)
+    }
 }
 
 
