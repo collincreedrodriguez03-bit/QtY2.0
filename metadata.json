@@ -1,0 +1,7 @@
+{
+  "name": "Quantitative Telemetry",
+  "description": "BTC-first quantitative prediction engine with walk-forward validation and high thinking analysis",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
