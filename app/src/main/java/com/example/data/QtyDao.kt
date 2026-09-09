@@ -38,6 +38,15 @@ interface QtyDao {
     @Query("SELECT * FROM feature_research_evaluations ORDER BY evaluationTimestamp DESC LIMIT 50")
     fun getRecentFeatureResearchEvaluations(): Flow<List<FeatureResearchEvaluationEntity>>
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertTrainedModel(model: TrainedModelEntity)
+
+    @Query("SELECT * FROM trained_models WHERE horizon = :horizon ORDER BY trainingEndTime DESC LIMIT 1")
+    suspend fun getLatestTrainedModel(horizon: String): TrainedModelEntity?
+
+    @Query("SELECT * FROM trained_models ORDER BY trainingEndTime DESC LIMIT 50")
+    fun getRecentTrainedModels(): Flow<List<TrainedModelEntity>>
+
     @Query("SELECT * FROM predictions ORDER BY timestamp DESC LIMIT 50")
     fun getRecentPredictions(): Flow<List<PredictionEntity>>
 

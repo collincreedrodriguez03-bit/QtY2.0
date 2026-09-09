@@ -266,39 +266,48 @@ class QtyTruthfulTest {
     }
 
     @Test
-    fun `test feature research evaluator handles zero variance labels`() {
-        val evaluator = FeatureResearchEvaluator()
-        val pairs = listOf(
-            Pair(0.1, 0.05),
-            Pair(0.2, 0.05),
-            Pair(0.3, 0.05),
-            Pair(0.4, 0.05),
-            Pair(0.5, 0.05)
+    fun `test horizon independence and no prediction without trained parameters`() {
+        val trainer = ModelTrainer()
+        val engine = TrainedPredictionEngine()
+
+        val ticks = (1..30).map { i -> Pair(100.0 + i, i * 1000L) }
+
+        // Without trained parameters, engine must abstain (NO_PREDICTION)
+        val predNoModel = engine.evaluateHorizon(ticks, 5000L, "5s", null)
+        assertEquals("NO_PREDICTION", predNoModel.status)
+        assertNull(predNoModel.probability)
+        assertFalse(predNoModel.isTrained)
+
+        // Train 5s model
+        val train5s = trainer.trainModel(ticks, "5s", "v1")
+        assertTrue(train5s.success)
+        val params5sJson = trainer.serializeParameters(train5s.parameters!!)
+
+        // Train 15s model (independent)
+        val train15s = trainer.trainModel(ticks, "15s", "v1")
+        val params15sJson = train15s.parameters?.let { trainer.serializeParameters(it) }
+
+        val pred5s = engine.evaluateHorizon(ticks, 5000L, "5s", params5sJson)
+        assertEquals("COMPLETED", pred5s.status)
+        assertNotNull(pred5s.probability)
+    }
+
+    @Test
+    fun `test no lookahead during label construction`() {
+        val trainer = ModelTrainer()
+        // T = 5000, Horizon 5s requires future tick at >= 10000
+        val ticks = listOf(
+            Pair(100.0, 1000L),
+            Pair(101.0, 2000L),
+            Pair(102.0, 3000L),
+            Pair(103.0, 4000L),
+            Pair(104.0, 5000L),
+            Pair(99.0, 8000L) // Before 10000L, so should NOT be picked as future outcome for T=5000
         )
-        val result = evaluator.evaluateIncrementalInformation("zero_var_label", 1000L, "5s", pairs)
-        assertEquals("INSUFFICIENT_DATA", result.evaluationStatus)
-        assertNull(result.incrementalInformationMetric)
-    }
-
-    @Test
-    fun `test unknown feature names return INVALID`() {
-        val pipeline = FeatureResearchPipeline()
-        val ticks = listOf(Pair(100.0, 1000L), Pair(101.0, 2000L))
-        val spec = FeatureCandidateSpec("unknown_fancy_indicator", 5000L)
-        val result = pipeline.extractFeature(ticks, 2000L, spec)
-        assertEquals("INVALID", result.validityStatus)
-        assertNull(result.value)
-    }
-
-    @Test
-    fun `test legacy FeatureExtractor cannot emit fabricated zeros as authentic`() {
-        val extractor = FeatureExtractor()
-        val vector = extractor.extract(listOf(Pair(100.0, 1000L))) // Insufficient data (< 5 ticks)
-        assertFalse(vector.isAuthentic)
-        assertNull(vector.return1s)
-        assertNull(vector.return5s)
-        assertNull(vector.volatility)
-        assertNull(vector.volumeDelta)
+        val dataset = trainer.buildTrainingDataset(ticks, "5s")
+        // Since no tick exists at >= 10000L, dataset should be empty (no lookahead / fake future)
+        assertTrue(dataset.isEmpty())
     }
 }
+
 

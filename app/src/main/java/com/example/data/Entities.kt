@@ -51,6 +51,20 @@ data class FeatureResearchEvaluationEntity(
     val evaluationStatus: String // "COMPLETED", "INSUFFICIENT_DATA"
 )
 
+@Entity(tableName = "trained_models")
+data class TrainedModelEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val horizon: String, // "5s", "15s", "30s", "1m", "5m", "15m"
+    val trainingDatasetIdentity: String,
+    val featureSetVersion: String,
+    val trainingStartTime: Long,
+    val trainingEndTime: Long,
+    val parametersJson: String, // Serialized weights and bias
+    val parametersVersion: String,
+    val sampleCount: Int,
+    val status: String // "TRAINED", "UNTRAINED"
+)
+
 @Entity(tableName = "predictions")
 data class PredictionEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,

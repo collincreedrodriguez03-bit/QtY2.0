@@ -11,10 +11,11 @@ import androidx.room.RoomDatabase
         IngestionEventEntity::class,
         FeatureRecordEntity::class,
         FeatureResearchEvaluationEntity::class,
+        TrainedModelEntity::class,
         PredictionEntity::class,
         WalkForwardAuditEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class QtyDatabase : RoomDatabase() {
