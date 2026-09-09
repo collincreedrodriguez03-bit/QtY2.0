@@ -55,20 +55,38 @@ class FeatureResearchEvaluator {
             den2 += dr * dr
         }
 
-        val correlation = if (den1 > 0.0 && den2 > 0.0) {
-            num / sqrt(den1 * den2)
-        } else {
-            0.0
+        // Zero variance check: if den1 == 0.0 or den2 == 0.0, correlation is undefined.
+        // Return null and INSUFFICIENT_DATA — never substitute 0.0 and mark COMPLETED.
+        if (den1 <= 0.0 || den2 <= 0.0) {
+            return ResearchEvaluationResult(
+                featureName = featureName,
+                evaluationTimestamp = evaluationTimestamp,
+                horizon = horizon,
+                sampleSize = sampleSize,
+                incrementalInformationMetric = null,
+                evaluationStatus = "INSUFFICIENT_DATA"
+            )
         }
 
-        val metric = if (correlation.isNaN() || correlation.isInfinite()) 0.0 else correlation
+        val correlation = num / sqrt(den1 * den2)
+
+        if (correlation.isNaN() || correlation.isInfinite()) {
+            return ResearchEvaluationResult(
+                featureName = featureName,
+                evaluationTimestamp = evaluationTimestamp,
+                horizon = horizon,
+                sampleSize = sampleSize,
+                incrementalInformationMetric = null,
+                evaluationStatus = "INSUFFICIENT_DATA"
+            )
+        }
 
         return ResearchEvaluationResult(
             featureName = featureName,
             evaluationTimestamp = evaluationTimestamp,
             horizon = horizon,
             sampleSize = sampleSize,
-            incrementalInformationMetric = metric,
+            incrementalInformationMetric = correlation,
             evaluationStatus = "COMPLETED"
         )
     }

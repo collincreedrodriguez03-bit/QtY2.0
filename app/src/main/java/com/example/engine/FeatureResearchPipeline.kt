@@ -21,17 +21,37 @@ data class FeatureCalculationResult(
 
 class FeatureResearchPipeline {
 
+    private val supportedFeaturePrefixes = listOf(
+        "log_return",
+        "rolling_volatility",
+        "trade_arrival_rate",
+        "mean_volume",
+        "sum_volume"
+    )
+
     /**
      * Calculates candidate features at a specific feature timestamp T using ONLY observations at or before T (No-Lookahead enforcement).
-     * @param ticks List of authentic historical ticks (Pair of Price: Double, Timestamp: Long) sorted by timestamp ascending.
-     * @param featureTimestamp The evaluation timestamp T.
-     * @param spec Specification of the candidate feature (name and lookback window).
      */
     fun extractFeature(
         ticks: List<Pair<Double, Long>>,
         featureTimestamp: Long,
         spec: FeatureCandidateSpec
     ): FeatureCalculationResult {
+        // Enforce unknown feature name check
+        val isSupported = supportedFeaturePrefixes.any { spec.featureName.startsWith(it) }
+        if (!isSupported) {
+            return FeatureCalculationResult(
+                featureName = spec.featureName,
+                timestamp = featureTimestamp,
+                lookbackWindowMs = spec.lookbackWindowMs,
+                sourceDataRangeStart = null,
+                sourceDataRangeEnd = null,
+                sampleCount = 0,
+                validityStatus = "INVALID",
+                value = null
+            )
+        }
+
         // Enforce no-lookahead: filter ticks strictly <= featureTimestamp
         val eligibleTicks = ticks.filter { it.second <= featureTimestamp }
 
@@ -108,12 +128,27 @@ class FeatureResearchPipeline {
 
     /**
      * Overload for volume-based features using Triple<Double (Price), Double? (Volume), Long (Timestamp)>
+     * Stricter missing-data policy: if any volume in the window is null, return INVALID / INSUFFICIENT_DATA with null value (no silent partial averaging).
      */
     fun extractVolumeFeature(
         ticksWithVolume: List<Triple<Double, Double?, Long>>,
         featureTimestamp: Long,
         spec: FeatureCandidateSpec
     ): FeatureCalculationResult {
+        val isSupported = supportedFeaturePrefixes.any { spec.featureName.startsWith(it) }
+        if (!isSupported) {
+            return FeatureCalculationResult(
+                featureName = spec.featureName,
+                timestamp = featureTimestamp,
+                lookbackWindowMs = spec.lookbackWindowMs,
+                sourceDataRangeStart = null,
+                sourceDataRangeEnd = null,
+                sampleCount = 0,
+                validityStatus = "INVALID",
+                value = null
+            )
+        }
+
         val eligibleTicks = ticksWithVolume.filter { it.third <= featureTimestamp }
         val lookbackStart = featureTimestamp - spec.lookbackWindowMs
         val windowTicks = eligibleTicks.filter { it.third >= lookbackStart }
@@ -131,6 +166,21 @@ class FeatureResearchPipeline {
                 sourceDataRangeEnd = dataRangeEnd,
                 sampleCount = sampleCount,
                 validityStatus = "INSUFFICIENT_DATA",
+                value = null
+            )
+        }
+
+        // Strict missing data policy: if any volume in the window is null, do not silently average partial data. Return INVALID.
+        val hasMissingVolume = windowTicks.any { it.second == null }
+        if (hasMissingVolume) {
+            return FeatureCalculationResult(
+                featureName = spec.featureName,
+                timestamp = featureTimestamp,
+                lookbackWindowMs = spec.lookbackWindowMs,
+                sourceDataRangeStart = dataRangeStart,
+                sourceDataRangeEnd = dataRangeEnd,
+                sampleCount = sampleCount,
+                validityStatus = "INVALID",
                 value = null
             )
         }

@@ -1,42 +1,47 @@
 package com.example.engine
 
+import kotlin.math.sqrt
+
 data class FeatureVector(
-    val return1s: Double,
-    val return5s: Double,
-    val volatility: Double,
-    val volumeDelta: Double,
+    val return1s: Double?,
+    val return5s: Double?,
+    val volatility: Double?,
+    val volumeDelta: Double?,
     val isAuthentic: Boolean
 )
 
 class FeatureExtractor {
     fun extract(ticks: List<Pair<Double, Long>>): FeatureVector {
         if (ticks.size < 5) {
-            return FeatureVector(0.0, 0.0, 0.0, 0.0, false)
+            return FeatureVector(null, null, null, null, false)
         }
         val current = ticks.last().first
         val p1 = ticks[ticks.size - 2].first
         val p5 = ticks[maxOf(0, ticks.size - 5)].first
 
-        val return1s = (current - p1) / p1
-        val return5s = (current - p5) / p5
+        val return1s = if (p1 > 0.0) (current - p1) / p1 else null
+        val return5s = if (p5 > 0.0) (current - p5) / p5 else null
 
         val recentReturns = mutableListOf<Double>()
         for (i in 1 until minOf(ticks.size, 15)) {
             val prev = ticks[ticks.size - i - 1].first
             val curr = ticks[ticks.size - i].first
-            recentReturns.add((curr - prev) / prev)
+            if (prev > 0.0 && curr > 0.0) {
+                recentReturns.add((curr - prev) / prev)
+            }
         }
-        val meanReturn = if (recentReturns.isNotEmpty()) recentReturns.average() else 0.0
-        val variance = if (recentReturns.size > 1) recentReturns.map { (it - meanReturn) * (it - meanReturn) }.average() else 0.0
-        val volatility = kotlin.math.sqrt(variance)
-
-        val volumeDelta = 0.0 // Requires authentic level-2 or trade volume stream
+        if (recentReturns.size < 2) {
+            return FeatureVector(return1s, return5s, null, null, false)
+        }
+        val meanReturn = recentReturns.average()
+        val variance = recentReturns.map { (it - meanReturn) * (it - meanReturn) }.average()
+        val volatility = sqrt(variance)
 
         return FeatureVector(
             return1s = return1s,
             return5s = return5s,
-            volatility = volatility,
-            volumeDelta = volumeDelta,
+            volatility = if (volatility.isNaN() || volatility.isInfinite()) null else volatility,
+            volumeDelta = null,
             isAuthentic = true
         )
     }

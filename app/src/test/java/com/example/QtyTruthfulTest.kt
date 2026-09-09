@@ -251,19 +251,54 @@ class QtyTruthfulTest {
     }
 
     @Test
-    fun `test feature research evaluator measures incremental info without leakage`() {
+    fun `test feature research evaluator handles zero variance feature values`() {
         val evaluator = FeatureResearchEvaluator()
         val pairs = listOf(
-            Pair(0.1, 0.02),
-            Pair(0.2, 0.03),
-            Pair(0.3, 0.04),
-            Pair(0.4, 0.05),
-            Pair(0.5, 0.06)
+            Pair(1.0, 0.02),
+            Pair(1.0, 0.03),
+            Pair(1.0, 0.04),
+            Pair(1.0, 0.05),
+            Pair(1.0, 0.06)
         )
-        val result = evaluator.evaluateIncrementalInformation("test_feature", 1000L, "5s", pairs)
+        val result = evaluator.evaluateIncrementalInformation("zero_var_feat", 1000L, "5s", pairs)
+        assertEquals("INSUFFICIENT_DATA", result.evaluationStatus)
+        assertNull(result.incrementalInformationMetric)
+    }
 
-        assertEquals("COMPLETED", result.evaluationStatus)
-        assertNotNull(result.incrementalInformationMetric)
-        assertTrue(result.incrementalInformationMetric != null && result.incrementalInformationMetric > 0.9)
+    @Test
+    fun `test feature research evaluator handles zero variance labels`() {
+        val evaluator = FeatureResearchEvaluator()
+        val pairs = listOf(
+            Pair(0.1, 0.05),
+            Pair(0.2, 0.05),
+            Pair(0.3, 0.05),
+            Pair(0.4, 0.05),
+            Pair(0.5, 0.05)
+        )
+        val result = evaluator.evaluateIncrementalInformation("zero_var_label", 1000L, "5s", pairs)
+        assertEquals("INSUFFICIENT_DATA", result.evaluationStatus)
+        assertNull(result.incrementalInformationMetric)
+    }
+
+    @Test
+    fun `test unknown feature names return INVALID`() {
+        val pipeline = FeatureResearchPipeline()
+        val ticks = listOf(Pair(100.0, 1000L), Pair(101.0, 2000L))
+        val spec = FeatureCandidateSpec("unknown_fancy_indicator", 5000L)
+        val result = pipeline.extractFeature(ticks, 2000L, spec)
+        assertEquals("INVALID", result.validityStatus)
+        assertNull(result.value)
+    }
+
+    @Test
+    fun `test legacy FeatureExtractor cannot emit fabricated zeros as authentic`() {
+        val extractor = FeatureExtractor()
+        val vector = extractor.extract(listOf(Pair(100.0, 1000L))) // Insufficient data (< 5 ticks)
+        assertFalse(vector.isAuthentic)
+        assertNull(vector.return1s)
+        assertNull(vector.return5s)
+        assertNull(vector.volatility)
+        assertNull(vector.volumeDelta)
     }
 }
+
