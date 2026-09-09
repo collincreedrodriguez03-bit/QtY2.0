@@ -1,5 +1,6 @@
 package com.example.engine
 
+import com.example.data.TrainedModelEntity
 import com.squareup.moshi.Moshi
 import kotlin.math.exp
 
@@ -17,54 +18,69 @@ class TrainedPredictionEngine {
     private val paramsAdapter = moshi.adapter(ModelParameters::class.java)
     private val pipeline = FeatureResearchPipeline()
 
-    private val supportedHorizons = listOf("5s", "15s", "30s", "1m", "5m", "15m")
-
     /**
-     * Evaluates a specific horizon independently using ONLY its own trained parameters.
-     * Never derives one horizon from another.
+     * Evaluates a specific horizon independently using ONLY its own trained parameters and matching provenance metadata.
+     * Returns NO_PREDICTION if stored model metadata does not match active ModelSpecification.
      */
     fun evaluateHorizon(
         ticks: List<Pair<Double, Long>>,
         inferenceTimestamp: Long,
-        horizon: String,
-        parametersJson: String?
+        storedModel: TrainedModelEntity?
     ): TrainedHorizonPrediction {
-        if (!supportedHorizons.contains(horizon)) {
+        if (storedModel == null) {
+            return TrainedHorizonPrediction("unknown", "NO_PREDICTION", null, null, null, false)
+        }
+
+        val horizon = storedModel.horizon
+        val spec = ModelSpecifications.getSpecification(horizon)
+        if (spec == null) {
             return TrainedHorizonPrediction(horizon, "NO_PREDICTION", null, null, null, false)
         }
 
-        // Abstention if no trained parameters exist
-        if (parametersJson.isNullOrBlank()) {
+        // Verify provenance and metadata against active ModelSpecification
+        if (storedModel.featureSetVersion != spec.featureSetVersion ||
+            storedModel.labelVersion != spec.labelVersion ||
+            storedModel.parametersVersion != spec.parametersVersion) {
+            return TrainedHorizonPrediction(horizon, "NO_PREDICTION", null, null, null, false)
+        }
+
+        if (storedModel.parametersJson.isNullOrBlank()) {
             return TrainedHorizonPrediction(horizon, "NO_PREDICTION", null, null, null, false)
         }
 
         val params = try {
-            paramsAdapter.fromJson(parametersJson)
+            paramsAdapter.fromJson(storedModel.parametersJson)
         } catch (e: Exception) {
             null
         }
 
-        if (params == null || params.weights.isEmpty()) {
+        if (params == null || params.weights.size != spec.orderedFeatureNames.size) {
             return TrainedHorizonPrediction(horizon, "NO_PREDICTION", null, null, null, false)
         }
 
         // Enforce no-lookahead: feature extraction only uses ticks <= inferenceTimestamp
-        val spec = FeatureCandidateSpec("log_return_5s", 10000L)
-        val featResult = pipeline.extractFeature(ticks, inferenceTimestamp, spec)
+        val historyTicks = ticks.filter { it.second <= inferenceTimestamp }
+        val featureValues = mutableListOf<Double>()
 
-        if (featResult.validityStatus != "VALID" || featResult.value == null) {
-            return TrainedHorizonPrediction(horizon, "NO_PREDICTION", null, null, null, false)
+        for (featName in spec.orderedFeatureNames) {
+            val lookback = if (featName.contains("1m")) 60000L else if (featName.contains("5m")) 300000L else 10000L
+            val candidateSpec = FeatureCandidateSpec(featName, lookback)
+            val featResult = pipeline.extractFeature(historyTicks, inferenceTimestamp, candidateSpec)
+            if (featResult.validityStatus == "VALID" && featResult.value != null) {
+                featureValues.add(featResult.value)
+            } else {
+                return TrainedHorizonPrediction(horizon, "NO_PREDICTION", null, null, null, false)
+            }
         }
 
         // Mathematical inference from trained parameters only
-        val weight = params.weights[0]
-        val bias = params.bias
-        val x = featResult.value
-        val z = weight * x + bias
+        var z = params.bias
+        for (i in featureValues.indices) {
+            z += params.weights[i] * featureValues[i]
+        }
         val prob = 1.0 / (1.0 + exp(-maxOf(-30.0, minOf(30.0, z))))
 
         val direction = if (prob >= 0.5) "UP" else "DOWN"
-        // Uncertainty derived from distance from 0.5 boundary
         val uncertainty = 1.0 - (2.0 * kotlin.math.abs(prob - 0.5))
 
         return TrainedHorizonPrediction(
@@ -83,10 +99,10 @@ class TrainedPredictionEngine {
     fun evaluateAllHorizons(
         ticks: List<Pair<Double, Long>>,
         inferenceTimestamp: Long,
-        modelParamsMap: Map<String, String?>
+        modelsMap: Map<String, TrainedModelEntity?>
     ): List<TrainedHorizonPrediction> {
-        return supportedHorizons.map { horizon ->
-            evaluateHorizon(ticks, inferenceTimestamp, horizon, modelParamsMap[horizon])
+        return ModelSpecifications.supportedHorizons.map { horizon ->
+            evaluateHorizon(ticks, inferenceTimestamp, modelsMap[horizon])
         }
     }
 }

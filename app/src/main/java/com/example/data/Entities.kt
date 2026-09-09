@@ -57,6 +57,7 @@ data class TrainedModelEntity(
     val horizon: String, // "5s", "15s", "30s", "1m", "5m", "15m"
     val trainingDatasetIdentity: String,
     val featureSetVersion: String,
+    val labelVersion: String,
     val trainingStartTime: Long,
     val trainingEndTime: Long,
     val parametersJson: String, // Serialized weights and bias

@@ -273,7 +273,7 @@ class QtyTruthfulTest {
         val ticks = (1..30).map { i -> Pair(100.0 + i, i * 1000L) }
 
         // Without trained parameters, engine must abstain (NO_PREDICTION)
-        val predNoModel = engine.evaluateHorizon(ticks, 5000L, "5s", null)
+        val predNoModel = engine.evaluateHorizon(ticks, 5000L, null)
         assertEquals("NO_PREDICTION", predNoModel.status)
         assertNull(predNoModel.probability)
         assertFalse(predNoModel.isTrained)
@@ -281,15 +281,104 @@ class QtyTruthfulTest {
         // Train 5s model
         val train5s = trainer.trainModel(ticks, "5s", "v1")
         assertTrue(train5s.success)
-        val params5sJson = trainer.serializeParameters(train5s.parameters!!)
+        val spec5s = ModelSpecifications.getSpecification("5s")!!
+        val model5s = TrainedModelEntity(
+            horizon = "5s",
+            trainingDatasetIdentity = "v1",
+            featureSetVersion = spec5s.featureSetVersion,
+            labelVersion = spec5s.labelVersion,
+            trainingStartTime = train5s.trainingStartTime,
+            trainingEndTime = train5s.trainingEndTime,
+            parametersJson = trainer.serializeParameters(train5s.parameters!!),
+            parametersVersion = spec5s.parametersVersion,
+            sampleCount = train5s.sampleCount,
+            status = "TRAINED"
+        )
 
         // Train 15s model (independent)
         val train15s = trainer.trainModel(ticks, "15s", "v1")
-        val params15sJson = train15s.parameters?.let { trainer.serializeParameters(it) }
 
-        val pred5s = engine.evaluateHorizon(ticks, 5000L, "5s", params5sJson)
+        val pred5s = engine.evaluateHorizon(ticks, 5000L, model5s)
         assertEquals("COMPLETED", pred5s.status)
         assertNotNull(pred5s.probability)
+    }
+
+    @Test
+    fun `test unknown horizon fails closed`() {
+        val trainer = ModelTrainer()
+        val ms = trainer.horizonToMs("invalid_horizon")
+        assertNull(ms)
+
+        val ticks = (1..30).map { i -> Pair(100.0 + i, i * 1000L) }
+        val result = trainer.trainModel(ticks, "invalid_horizon", "v1")
+        assertFalse(result.success)
+    }
+
+    @Test
+    fun `test mismatched feature version returns NO_PREDICTION`() {
+        val trainer = ModelTrainer()
+        val engine = TrainedPredictionEngine()
+        val ticks = (1..30).map { i -> Pair(100.0 + i, i * 1000L) }
+
+        val trainResult = trainer.trainModel(ticks, "5s", "v1")
+        assertTrue(trainResult.success)
+
+        val storedModel = TrainedModelEntity(
+            horizon = "5s",
+            trainingDatasetIdentity = "v1",
+            featureSetVersion = "mismatched_version",
+            labelVersion = trainResult.labelVersion,
+            trainingStartTime = trainResult.trainingStartTime,
+            trainingEndTime = trainResult.trainingEndTime,
+            parametersJson = trainer.serializeParameters(trainResult.parameters!!),
+            parametersVersion = trainResult.parametersVersion,
+            sampleCount = trainResult.sampleCount,
+            status = "TRAINED"
+        )
+
+        val prediction = engine.evaluateHorizon(ticks, 5000L, storedModel)
+        assertEquals("NO_PREDICTION", prediction.status)
+    }
+
+    @Test
+    fun `test each horizon has independent specification`() {
+        val spec5s = ModelSpecifications.getSpecification("5s")
+        val spec15s = ModelSpecifications.getSpecification("15s")
+        assertNotNull(spec5s)
+        assertNotNull(spec15s)
+        assertNotEquals(spec5s?.horizon, spec15s?.horizon)
+        assertEquals(listOf("log_return_5s"), spec5s?.orderedFeatureNames)
+        assertEquals(listOf("log_return_15s"), spec15s?.orderedFeatureNames)
+    }
+
+    @Test
+    fun `test training and inference use identical ordered features`() {
+        val trainer = ModelTrainer()
+        val engine = TrainedPredictionEngine()
+        val ticks = (1..30).map { i -> Pair(100.0 + i, i * 1000L) }
+
+        val trainResult = trainer.trainModel(ticks, "5s", "v1")
+        assertTrue(trainResult.success)
+
+        val spec = ModelSpecifications.getSpecification("5s")
+        assertNotNull(spec)
+
+        val storedModel = TrainedModelEntity(
+            horizon = "5s",
+            trainingDatasetIdentity = "v1",
+            featureSetVersion = spec!!.featureSetVersion,
+            labelVersion = spec.labelVersion,
+            trainingStartTime = trainResult.trainingStartTime,
+            trainingEndTime = trainResult.trainingEndTime,
+            parametersJson = trainer.serializeParameters(trainResult.parameters!!),
+            parametersVersion = spec.parametersVersion,
+            sampleCount = trainResult.sampleCount,
+            status = "TRAINED"
+        )
+
+        val prediction = engine.evaluateHorizon(ticks, 5000L, storedModel)
+        assertEquals("COMPLETED", prediction.status)
+        assertEquals("5s", prediction.horizon)
     }
 
     @Test
