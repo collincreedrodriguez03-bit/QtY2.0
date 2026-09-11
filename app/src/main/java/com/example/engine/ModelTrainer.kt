@@ -75,7 +75,7 @@ class ModelTrainer {
 
             val targetTime = t + horizonMs
             // Centralized TargetResolutionPolicy
-            val futureTick = spec.targetResolutionPolicy.resolveTargetTick(sortedTicks, targetTime, horizonMs) ?: continue
+            val futureTick = spec.targetResolutionPolicy.resolveTargetTick(sortedTicks, targetTime) ?: continue
             val historyTicks = sortedTicks.filter { it.second <= t }
 
             val featureValues = mutableListOf<Double>()

@@ -137,7 +137,7 @@ class WalkForwardValidator(
             val ticksAtT = sortedTicks.filter { it.second <= t }
             val prediction = predictionEngine.evaluateHorizon(ticksAtT, t, storedModel)
             val targetTime = t + horizonMs
-            val futureTick = spec.targetResolutionPolicy.resolveTargetTick(sortedTicks, targetTime, horizonMs)
+            val futureTick = spec.targetResolutionPolicy.resolveTargetTick(sortedTicks, targetTime)
 
             if (prediction.status == "COMPLETED" && prediction.probability != null && futureTick != null) {
                 val pT = calibTicks[i].first
@@ -172,7 +172,7 @@ class WalkForwardValidator(
             val ticksAtT = sortedTicks.filter { it.second <= t }
             val prediction = predictionEngine.evaluateHorizon(ticksAtT, t, storedModel)
             val targetTime = t + horizonMs
-            val futureTick = spec.targetResolutionPolicy.resolveTargetTick(sortedTicks, targetTime, horizonMs)
+            val futureTick = spec.targetResolutionPolicy.resolveTargetTick(sortedTicks, targetTime)
 
             // Count an OOS sample as valid only after BOTH a prediction exists AND a valid realized future outcome exists within tolerance
             if (prediction.status != "COMPLETED" || prediction.probability == null || prediction.direction == null || futureTick == null) {

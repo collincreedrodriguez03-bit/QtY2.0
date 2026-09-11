@@ -492,9 +492,66 @@ class QtyTruthfulTest {
             Pair(100.0, 10000L),
             Pair(101.0, 15000L)
         )
-        val resolved = policy.resolveTargetTick(ticks, 12000L, 5000L)
+        val resolved = policy.resolveTargetTick(ticks, 12000L)
         assertNotNull(resolved)
         assertEquals(15000L, resolved?.second)
+    }
+
+    @Test
+    fun `test policy consistency across training calibration oos and live outcome resolution`() {
+        val spec = ModelSpecifications.getSpecification("5s")!!
+        val ticks = listOf(
+            Pair(100.0, 1000L),
+            Pair(105.0, 2000L),
+            Pair(95.0, 3000L),
+            Pair(110.0, 4000L),
+            Pair(90.0, 5000L),
+            Pair(115.0, 6000L),
+            Pair(85.0, 7000L),
+            Pair(120.0, 8000L),
+            Pair(80.0, 9000L),
+            Pair(125.0, 10000L),
+            Pair(75.0, 11000L),
+            Pair(130.0, 12000L),
+            Pair(70.0, 13000L),
+            Pair(135.0, 14000L),
+            Pair(65.0, 15000L),
+            Pair(140.0, 16000L),
+            Pair(60.0, 17000L),
+            Pair(145.0, 18000L),
+            Pair(55.0, 19000L),
+            Pair(150.0, 20000L),
+            Pair(50.0, 21000L),
+            Pair(155.0, 22000L),
+            Pair(45.0, 23000L),
+            Pair(160.0, 24000L),
+            Pair(40.0, 25000L),
+            Pair(165.0, 26000L),
+            Pair(35.0, 27000L),
+            Pair(170.0, 28000L),
+            Pair(30.0, 29000L),
+            Pair(175.0, 30000L),
+            Pair(25.0, 31000L),
+            Pair(180.0, 32000L),
+            Pair(20.0, 33000L),
+            Pair(185.0, 34000L),
+            Pair(15.0, 35000L)
+        )
+
+        // 1. Training path uses spec.labelPolicy and spec.targetResolutionPolicy
+        val trainer = ModelTrainer()
+        val trainingDataset = trainer.buildTrainingDataset(ticks, "5s")
+        assertNotNull(trainingDataset)
+
+        // 2 & 3. WalkForwardValidator runs training, calibration, and OOS validation using the exact same spec policies
+        val validator = WalkForwardValidator(ValidationConfig(minTrainingSamples = 5, minCalibrationSamples = 3, minOosSamples = 3, minEvidenceSamples = 2))
+        val result = validator.validate(ticks, "5s", "ds_consistency_v1")
+        assertEquals("COMPLETED", result.status)
+        assertEquals(spec.labelPolicy.version, result.labelVersion)
+
+        // 4. Live outcome resolution (ModelSpecifications.resolveOutcome) uses the exact same LabelPolicy and TargetResolutionPolicy
+        val liveOutcome = ModelSpecifications.resolveOutcome(ticks, 1000L, "5s", 5000L)
+        assertNotNull(liveOutcome)
     }
 
     @Test
