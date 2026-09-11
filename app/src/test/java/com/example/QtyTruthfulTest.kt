@@ -444,12 +444,57 @@ class QtyTruthfulTest {
         val validator = WalkForwardValidator()
         // Provide ticks where trailing ticks have no future outcome within horizon (e.g. truncated at end)
         val ticks = (1..50).map { i -> Pair(100.0 + i, i * 1000L) }
-        val result = validator.validate(ticks, "15m", "ds_test_v1") // 15m horizon on 50s data has no future outcomes
+        val result = validator.validate(ticks, "900s", "ds_test_v1") // 900s horizon on 50s data has no future outcomes
 
         // Should be UNAVAILABLE due to insufficient realizable samples
         assertEquals("UNAVAILABLE", result.status)
         assertNull(result.sampleCount)
         assertNull(result.oosWinRate)
+    }
+
+    @Test
+    fun `test insufficient data returned when evidence requirements unmet`() {
+        val validator = WalkForwardValidator(ValidationConfig(minEvidenceSamples = 1000))
+        val ticks = (1..100).map { i -> Pair(100.0 + i, i * 1000L) }
+        val result = validator.validate(ticks, "5s", "ds_test_v1")
+        assertEquals("INSUFFICIENT_DATA", result.status)
+    }
+
+    @Test
+    fun `test source timestamp defines training provenance not system time`() {
+        val trainer = ModelTrainer()
+        val ticks = listOf(
+            Pair(100.0, 5000L),
+            Pair(101.0, 6000L),
+            Pair(102.0, 7000L),
+            Pair(103.0, 8000L),
+            Pair(104.0, 9000L),
+            Pair(105.0, 15000L)
+        )
+        val result = trainer.trainModel(ticks, "5s", "v1")
+        assertEquals(5000L, result.trainingStartTime)
+        assertEquals(15000L, result.trainingEndTime)
+    }
+
+    @Test
+    fun `test canonical horizons enforce exact list and fail closed on unknown`() {
+        val expected = listOf("5s", "10s", "30s", "60s", "120s", "300s", "600s", "900s")
+        assertEquals(expected, ModelSpecifications.supportedHorizons)
+        assertNull(ModelSpecifications.getSpecification("15s"))
+        assertNull(ModelSpecifications.getSpecification("1m"))
+        assertNull(ModelSpecifications.getSpecification("unknown"))
+    }
+
+    @Test
+    fun `test centralized target resolution policy`() {
+        val policy = TargetResolutionPolicy(maxToleranceMs = 5000L)
+        val ticks = listOf(
+            Pair(100.0, 10000L),
+            Pair(101.0, 15000L)
+        )
+        val resolved = policy.resolveTargetTick(ticks, 12000L, 5000L)
+        assertNotNull(resolved)
+        assertEquals(15000L, resolved?.second)
     }
 
     @Test

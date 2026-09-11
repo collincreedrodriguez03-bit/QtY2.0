@@ -52,9 +52,8 @@ class ModelTrainer {
     }
 
     /**
-     * Constructs timestamp-correct realized log-return labels supporting UP, DOWN, FLAT/NO_DIRECTION.
-     * Dead-zone threshold epsilon = 0.00005 (0.005%). FLAT labels are excluded from binary training dataset.
-     * Target-resolution policy: future tick within [T+h, T+h + tolerance].
+     * Constructs timestamp-correct realized log-return labels supporting UP, DOWN, FLAT/NO_DIRECTION
+     * using explicit LabelPolicy and centralized TargetResolutionPolicy.
      */
     fun buildTrainingDataset(
         ticks: List<Pair<Double, Long>>,
@@ -64,8 +63,7 @@ class ModelTrainer {
         val spec = ModelSpecifications.getSpecification(horizon) ?: return emptyList()
         val dataset = mutableListOf<Pair<List<Double>, Double>>()
         val pipeline = FeatureResearchPipeline()
-        val epsilon = 0.00005
-        val maxToleranceMs = maxOf(10000L, horizonMs)
+        val flatThreshold = spec.labelPolicy.flatThreshold
 
         // Ensure chronological order and filter out invalid/missing source timestamps
         val sortedTicks = ticks.filter { it.second > 0L && it.first > 0.0 }.sortedBy { it.second }
@@ -76,10 +74,8 @@ class ModelTrainer {
             val pT = currentTick.first
 
             val targetTime = t + horizonMs
-            val maxTargetTime = targetTime + maxToleranceMs
-
-            // Target-resolution policy: nearest future tick strictly within valid window
-            val futureTick = sortedTicks.firstOrNull { it.second >= targetTime && it.second <= maxTargetTime } ?: continue
+            // Centralized TargetResolutionPolicy
+            val futureTick = spec.targetResolutionPolicy.resolveTargetTick(sortedTicks, targetTime, horizonMs) ?: continue
             val historyTicks = sortedTicks.filter { it.second <= t }
 
             val featureValues = mutableListOf<Double>()
@@ -102,10 +98,10 @@ class ModelTrainer {
                 if (pT > 0.0 && pFuture > 0.0) {
                     val logReturn = ln(pFuture / pT)
                     when {
-                        logReturn > epsilon -> dataset.add(Pair(featureValues, 1.0)) // UP
-                        logReturn < -epsilon -> dataset.add(Pair(featureValues, 0.0)) // DOWN
+                        logReturn > flatThreshold -> dataset.add(Pair(featureValues, 1.0)) // UP
+                        logReturn < -flatThreshold -> dataset.add(Pair(featureValues, 0.0)) // DOWN
                         else -> {
-                            // FLAT / NO_DIRECTION: excluded from binary training dataset per dead-zone policy
+                            // FLAT / NO_DIRECTION: excluded from binary training dataset per explicit LabelPolicy
                         }
                     }
                 }
@@ -116,15 +112,19 @@ class ModelTrainer {
 
     /**
      * Trains a logistic regression model via gradient descent using exact ModelSpecification provenance.
+     * Uses sourceTimestamp (min/max of training ticks) for training period provenance, never System.currentTimeMillis().
      */
     fun trainModel(
         ticks: List<Pair<Double, Long>>,
         horizon: String,
         trainingDatasetIdentity: String
     ): TrainingResult {
-        val trainingStartTime = System.currentTimeMillis()
         val horizonMs = horizonToMs(horizon)
         val spec = ModelSpecifications.getSpecification(horizon)
+
+        val sortedTicks = ticks.filter { it.second > 0L && it.first > 0.0 }.sortedBy { it.second }
+        val trainingStartTime = sortedTicks.firstOrNull()?.second ?: 0L
+        val trainingEndTime = sortedTicks.lastOrNull()?.second ?: 0L
 
         if (horizonMs == null || spec == null) {
             return TrainingResult(
@@ -136,14 +136,13 @@ class ModelTrainer {
                 featureSetVersion = "unknown",
                 labelVersion = "unknown",
                 trainingStartTime = trainingStartTime,
-                trainingEndTime = System.currentTimeMillis(),
+                trainingEndTime = trainingEndTime,
                 parametersVersion = "v1",
                 message = "Unknown or unsupported horizon: $horizon (fails closed)"
             )
         }
 
-        val trainingData = buildTrainingDataset(ticks, horizon)
-        val trainingEndTime = System.currentTimeMillis()
+        val trainingData = buildTrainingDataset(sortedTicks, horizon)
 
         if (trainingData.size < 5) {
             return TrainingResult(
