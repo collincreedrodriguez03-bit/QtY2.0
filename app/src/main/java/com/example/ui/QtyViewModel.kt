@@ -101,7 +101,7 @@ class QtyViewModel(application: Application) : AndroidViewModel(application) {
     fun requestHighThinkingAudit(customPrompt: String) {
         viewModelScope.launch {
             _uiState.update { it.copy(isAiThinking = true, aiAuditResult = "") }
-            val prompt = if (customPrompt.isNotBlank()) customPrompt else "Perform a rigorous quantitative audit of QtY BTC prediction engine across 5s-15m horizons, evaluating win rate calibration, feature importance stability, and no-lookahead provenance."
+            val prompt = if (customPrompt.isNotBlank()) customPrompt else "Perform a rigorous quantitative audit of QtY BTC prediction engine across 5s-900s horizons, evaluating win rate calibration, feature importance stability, and no-lookahead provenance."
             val result = GeminiThinkingClient.auditTradingEngine(prompt)
             _uiState.update { it.copy(isAiThinking = false, aiAuditResult = result) }
         }

@@ -295,8 +295,8 @@ class QtyTruthfulTest {
             status = "TRAINED"
         )
 
-        // Train 15s model (independent)
-        val train15s = trainer.trainModel(ticks, "15s", "v1")
+        // Train 60s model (independent)
+        val train60s = trainer.trainModel(ticks, "60s", "v1")
 
         val pred5s = engine.evaluateHorizon(ticks, 5000L, model5s)
         assertEquals("COMPLETED", pred5s.status)
@@ -582,6 +582,22 @@ class QtyTruthfulTest {
         val prediction = engine.evaluateHorizon(strictTicks, inferenceTimestamp, model)
 
         assertEquals("COMPLETED", prediction.status)
+    }
+
+    @Test
+    fun `test policy and config versions persistence and unsupported horizon failure`() {
+        val spec = ModelSpecifications.getSpecification("5s")!!
+        assertEquals("log_return_v3_heuristic_unvalidated", spec.labelPolicy.version)
+        assertEquals("resolution_v2_horizon_aware", spec.targetResolutionPolicy.version)
+
+        val config = ValidationConfig(configVersion = "v2_hardened")
+        assertEquals("v2_hardened", config.configVersion)
+
+        val ticks = (1..30).map { i -> Pair(100.0 + i, i * 1000L) }
+        val validator = WalkForwardValidator(config)
+        val result = validator.validate(ticks, "15s", "ds_v1")
+        assertEquals("UNAVAILABLE", result.status)
+        assertEquals("v2_hardened", result.configVersion)
     }
 }
 

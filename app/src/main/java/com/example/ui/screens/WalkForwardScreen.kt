@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.example.ui.QtyUiState
+import com.example.engine.ModelSpecifications
 
 @Composable
 fun WalkForwardScreen(
@@ -46,7 +47,7 @@ fun WalkForwardScreen(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("5s", "30s", "1m", "5m", "15m").forEach { horizon ->
+                        ModelSpecifications.supportedHorizons.forEach { horizon ->
                             OutlinedButton(
                                 onClick = { onRunAudit(horizon) },
                                 enabled = !state.isAuditing

@@ -54,7 +54,7 @@ data class FeatureResearchEvaluationEntity(
 @Entity(tableName = "trained_models")
 data class TrainedModelEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val horizon: String, // "5s", "15s", "30s", "1m", "5m", "15m"
+    val horizon: String, // "5s", "10s", "30s", "60s", "120s", "300s", "600s", "900s"
     val trainingDatasetIdentity: String,
     val featureSetVersion: String,
     val labelVersion: String,

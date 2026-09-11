@@ -54,7 +54,7 @@ fun HighThinkingScreen(
                         onValueChange = { promptInput = it },
                         modifier = Modifier.fillMaxWidth(),
                         label = { Text("Custom Audit Prompt (Optional)") },
-                        placeholder = { Text("e.g., Audit 15s order book imbalance lookahead risks...") },
+                        placeholder = { Text("e.g., Audit 60s order book imbalance lookahead risks...") },
                         maxLines = 3
                     )
 

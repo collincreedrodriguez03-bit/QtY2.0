@@ -3,13 +3,22 @@ package com.example.engine
 import kotlin.math.ln
 
 /**
- * Versioned, explicit research LabelPolicy with provenance and documented decision rationale.
- * Represents UP, DOWN, and FLAT classification based on realized log-returns with explicit dead-zone threshold.
+ * Constant Classification Audit:
+ * 1. Algorithm Parameters: Weights initialization, linear combination coefficients (bias).
+ * 2. Engineering Safeguards: Minimum sample requirements, positive price/timestamp filters.
+ * 3. Research Configurations: flatThreshold (unvalidated heuristic research config, not universal market truth), horizon-aware tolerances.
+ */
+
+/**
+ * Versioned, explicit research LabelPolicy with unvalidated heuristic provenance.
+ * Represents UP, DOWN, and FLAT classification based on realized log-returns with explicit threshold.
+ * NOTE: flatThreshold = 0.00005 is classified as a Research Configuration (heuristic unvalidated config),
+ * NOT an empirical universal market truth. Requires ongoing empirical validation.
  */
 data class LabelPolicy(
-    val version: String = "log_return_v3_research_explicit_flat",
+    val version: String = "log_return_v3_heuristic_unvalidated",
     val flatThreshold: Double = 0.00005,
-    val researchProvenance: String = "Explicit dead-zone flatThreshold = 0.00005 (0.005%) with documented research rationale: filters micro-noise in high-frequency BTC ticks while supporting UP, DOWN, and FLAT classification."
+    val researchProvenance: String = "Research Configuration (Unvalidated Heuristic): flatThreshold = 0.00005 (0.005%). Not an empirical universal market truth; filters micro-noise based on heuristic calibration and requires continuous empirical validation."
 ) {
     fun classify(logReturn: Double): String {
         return when {
@@ -23,17 +32,31 @@ data class LabelPolicy(
 /**
  * Exact TargetResolutionPolicy semantics for resolving T+h:
  * - Exact target timestamp: T_target = T + horizonMs
- * - Permitted resolution window: [T_target, T_target + maxToleranceMs] (WITHOUT implicit max(horizon, tolerance) widening)
+ * - Permitted resolution window: [T_target, T_target + dynamicTolerance] (Horizon-aware, avoiding silent universal 10s tolerance on short horizons like 5s)
  * - Selection rule when multiple observations exist: firstOrNull (earliest chronological observation within permitted window)
  * - Failure behavior when no valid observation exists: returns null (fails closed, no filling/lookahead)
+ * 
+ * Classification: Research Configuration & Engineering Safeguard.
  */
 data class TargetResolutionPolicy(
+    val version: String = "resolution_v2_horizon_aware",
     val maxToleranceMs: Long = 10000L,
-    val documentation: String = "Exact T_target = T + horizonMs. Window: [T_target, T_target + maxToleranceMs]. Selection: firstOrNull. Failure: null (fails closed)."
+    val documentation: String = "Horizon-aware target resolution policy: T_target = T + horizonMs. Window: [T_target, T_target + dynamicTolerance] where dynamicTolerance scales with horizon (5s -> 2000ms, 10s -> 3000ms, 30s -> 5000ms, 60s+ -> 10000ms). Selection: firstOrNull. Failure: null (fails closed)."
 ) {
-    fun resolveTargetTick(ticks: List<Pair<Double, Long>>, targetTime: Long): Pair<Double, Long>? {
-        val maxTargetTime = targetTime + maxToleranceMs
+    fun resolveTargetTick(ticks: List<Pair<Double, Long>>, targetTime: Long, horizonMs: Long): Pair<Double, Long>? {
+        val dynamicTolerance = when {
+            horizonMs <= 5000L -> 2000L
+            horizonMs <= 10000L -> 3000L
+            horizonMs <= 30000L -> 5000L
+            else -> maxToleranceMs
+        }
+        val maxTargetTime = targetTime + dynamicTolerance
         return ticks.firstOrNull { it.second >= targetTime && it.second <= maxTargetTime }
+    }
+
+    // Backward-compatible overload
+    fun resolveTargetTick(ticks: List<Pair<Double, Long>>, targetTime: Long): Pair<Double, Long>? {
+        return resolveTargetTick(ticks, targetTime, 60000L)
     }
 }
 
@@ -84,9 +107,10 @@ object ModelSpecifications {
         val spec = getSpecification(horizon) ?: return null
         val targetTime = predictionTimestamp + horizonMs
         val currentTick = ticks.firstOrNull { it.second == predictionTimestamp } ?: ticks.filter { it.second <= predictionTimestamp }.maxByOrNull { it.second } ?: return null
-        val futureTick = spec.targetResolutionPolicy.resolveTargetTick(ticks, targetTime) ?: return null
+        val futureTick = spec.targetResolutionPolicy.resolveTargetTick(ticks, targetTime, horizonMs) ?: return null
         if (currentTick.first <= 0.0 || futureTick.first <= 0.0) return null
         val logReturn = ln(futureTick.first / currentTick.first)
         return spec.labelPolicy.classify(logReturn)
     }
 }
+

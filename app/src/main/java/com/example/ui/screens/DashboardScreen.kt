@@ -109,7 +109,7 @@ fun DashboardScreen(
 
         item {
             Text(
-                text = "Independent Horizon Forecasts (5s–15m)",
+                text = "Independent Horizon Forecasts (5s–900s)",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onBackground
