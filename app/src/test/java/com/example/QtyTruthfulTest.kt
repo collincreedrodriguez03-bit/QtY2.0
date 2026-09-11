@@ -343,12 +343,12 @@ class QtyTruthfulTest {
     @Test
     fun `test each horizon has independent specification`() {
         val spec5s = ModelSpecifications.getSpecification("5s")
-        val spec15s = ModelSpecifications.getSpecification("15s")
+        val spec10s = ModelSpecifications.getSpecification("10s")
         assertNotNull(spec5s)
-        assertNotNull(spec15s)
-        assertNotEquals(spec5s?.horizon, spec15s?.horizon)
+        assertNotNull(spec10s)
+        assertNotEquals(spec5s?.horizon, spec10s?.horizon)
         assertEquals(listOf("log_return_5s"), spec5s?.orderedFeatureNames)
-        assertEquals(listOf("log_return_15s"), spec15s?.orderedFeatureNames)
+        assertEquals(listOf("log_return_10s"), spec10s?.orderedFeatureNames)
     }
 
     @Test
@@ -384,17 +384,16 @@ class QtyTruthfulTest {
     @Test
     fun `test no lookahead during label construction`() {
         val trainer = ModelTrainer()
-        // T = 5000, Horizon 5s requires future tick at >= 10000
+        // Ticks end at 5000L, so no future outcome at >= T + 5s exists for any t
         val ticks = listOf(
             Pair(100.0, 1000L),
             Pair(101.0, 2000L),
             Pair(102.0, 3000L),
             Pair(103.0, 4000L),
-            Pair(104.0, 5000L),
-            Pair(99.0, 8000L) // Before 10000L, so should NOT be picked as future outcome for T=5000
+            Pair(104.0, 5000L)
         )
         val dataset = trainer.buildTrainingDataset(ticks, "5s")
-        // Since no tick exists at >= 10000L, dataset should be empty (no lookahead / fake future)
+        // Since no tick exists at >= T + 5s, dataset should be empty (no lookahead / fake future)
         assertTrue(dataset.isEmpty())
     }
 

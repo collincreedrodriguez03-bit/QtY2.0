@@ -1,11 +1,13 @@
 package com.example.engine
 
 import com.example.data.TrainedModelEntity
+import kotlin.math.ln
 
 data class ValidationConfig(
     val minTrainingSamples: Int = 10,
     val minCalibrationSamples: Int = 5,
     val minOosSamples: Int = 5,
+    val minEvidenceSamples: Int = 15, // P0: Separate engineering minimums from evidence minimums
     val configVersion: String = "v1"
 )
 
@@ -40,6 +42,7 @@ class WalkForwardValidator(
 ) {
     private val trainer = ModelTrainer()
     private val predictionEngine = TrainedPredictionEngine()
+    private val epsilon = 0.00005
 
     fun validate(
         ticks: List<Pair<Double, Long>>,
@@ -49,6 +52,7 @@ class WalkForwardValidator(
         val horizonMs = trainer.horizonToMs(horizon)
         val spec = ModelSpecifications.getSpecification(horizon)
 
+        // P0: Unknown horizons fail closed
         if (horizonMs == null || spec == null) {
             return WalkForwardResult(
                 horizon = horizon,
@@ -73,14 +77,14 @@ class WalkForwardValidator(
                 falseNegatives = null,
                 brierScore = null,
                 calibrationError = null,
-                message = "Invalid or unsupported horizon"
+                message = "Invalid or unsupported horizon (fails closed)"
             )
         }
 
-        // Sort ticks chronologically to guarantee no shuffling
-        val sortedTicks = ticks.sortedBy { it.second }
+        // Sort ticks chronologically and filter out invalid/missing source timestamps
+        val sortedTicks = ticks.filter { it.second > 0L && it.first > 0.0 }.sortedBy { it.second }
         if (sortedTicks.isEmpty()) {
-            return unavailableResult(horizon, trainingDatasetIdentity, spec, "Empty ticks")
+            return unavailableResult(horizon, trainingDatasetIdentity, spec, "Empty or invalid source timestamp ticks")
         }
 
         // Chronological splits: Train (60%), Calibration (20%), OOS Test (20%)
@@ -91,7 +95,7 @@ class WalkForwardValidator(
         if (trainEndIdx < config.minTrainingSamples ||
             (calibEndIdx - trainEndIdx) < config.minCalibrationSamples ||
             (totalSize - calibEndIdx) < config.minOosSamples) {
-            return unavailableResult(horizon, trainingDatasetIdentity, spec, "Insufficient samples for configured split requirements")
+            return unavailableResult(horizon, trainingDatasetIdentity, spec, "Insufficient engineering samples for configured split requirements")
         }
 
         val trainTicks = sortedTicks.subList(0, trainEndIdx)
@@ -105,7 +109,7 @@ class WalkForwardValidator(
         val oosStart = oosTicks.first().second
         val oosEnd = oosTicks.last().second
 
-        // Train model strictly on training split
+        // Train model strictly on training split (Baseline Control: Price-Momentum Only)
         val trainingResult = trainer.trainModel(trainTicks, horizon, trainingDatasetIdentity)
         if (!trainingResult.success || trainingResult.parameters == null) {
             return unavailableResult(horizon, trainingDatasetIdentity, spec, "Model training failed: ${trainingResult.message}")
@@ -124,24 +128,36 @@ class WalkForwardValidator(
             status = "TRAINED"
         )
 
+        val maxToleranceMs = maxOf(10000L, horizonMs)
+
         // Calibration evaluation: strictly receive ONLY observations with timestamp <= T
         var totalCalibEval = 0
         var calibSquaredErrorSum = 0.0
-        for (i in 4 until calibTicks.size) {
+        for (i in calibTicks.indices) {
             val t = calibTicks[i].second
             val ticksAtT = sortedTicks.filter { it.second <= t }
             val prediction = predictionEngine.evaluateHorizon(ticksAtT, t, storedModel)
-            val futureTick = sortedTicks.firstOrNull { it.second >= t + horizonMs }
+            val targetTime = t + horizonMs
+            val maxTargetTime = targetTime + maxToleranceMs
+            val futureTick = sortedTicks.firstOrNull { it.second >= targetTime && it.second <= maxTargetTime }
+
             if (prediction.status == "COMPLETED" && prediction.probability != null && futureTick != null) {
-                val actual = if (futureTick.first > calibTicks[i].first) 1.0 else 0.0
-                val err = prediction.probability - actual
-                calibSquaredErrorSum += err * err
-                totalCalibEval++
+                val pT = calibTicks[i].first
+                val pFuture = futureTick.first
+                if (pT > 0.0 && pFuture > 0.0) {
+                    val logReturn = ln(pFuture / pT)
+                    if (kotlin.math.abs(logReturn) > epsilon) {
+                        val actual = if (logReturn > 0) 1.0 else 0.0
+                        val err = prediction.probability - actual
+                        calibSquaredErrorSum += err * err
+                        totalCalibEval++
+                    }
+                }
             }
         }
         val calibrationError = if (totalCalibEval > 0) kotlin.math.sqrt(calibSquaredErrorSum / totalCalibEval) else null
 
-        // Final OOS Test Evaluation: strictly receive ONLY observations with timestamp <= T, and require realizable future label
+        // Final OOS Test Evaluation: strictly receive ONLY observations with timestamp <= T, and require realizable future label within tolerance
         var attemptedOos = 0
         var validOos = 0
         var abstentions = 0
@@ -152,21 +168,37 @@ class WalkForwardValidator(
         var brierSquaredErrorSum = 0.0
         var correctPredictions = 0
 
-        for (i in 4 until oosTicks.size) {
+        for (i in oosTicks.indices) {
             val t = oosTicks[i].second
             attemptedOos++
             val ticksAtT = sortedTicks.filter { it.second <= t }
             val prediction = predictionEngine.evaluateHorizon(ticksAtT, t, storedModel)
-            val futureTick = sortedTicks.firstOrNull { it.second >= t + horizonMs }
+            val targetTime = t + horizonMs
+            val maxTargetTime = targetTime + maxToleranceMs
+            val futureTick = sortedTicks.firstOrNull { it.second >= targetTime && it.second <= maxTargetTime }
 
-            // Count an OOS sample as valid only after BOTH a prediction exists AND a valid realized future outcome exists
+            // Count an OOS sample as valid only after BOTH a prediction exists AND a valid realized future outcome exists within tolerance
             if (prediction.status != "COMPLETED" || prediction.probability == null || prediction.direction == null || futureTick == null) {
                 abstentions++
                 continue
             }
 
+            val pT = oosTicks[i].first
+            val pFuture = futureTick.first
+            if (pT <= 0.0 || pFuture <= 0.0) {
+                abstentions++
+                continue
+            }
+
+            val logReturn = ln(pFuture / pT)
+            if (kotlin.math.abs(logReturn) <= epsilon) {
+                // FLAT / NO_DIRECTION: excluded from binary performance evaluation
+                abstentions++
+                continue
+            }
+
             validOos++
-            val actualUp = futureTick.first > oosTicks[i].first
+            val actualUp = logReturn > 0
             val actualLabel = if (actualUp) 1.0 else 0.0
             val predictedUp = prediction.direction == "UP"
 
@@ -182,8 +214,9 @@ class WalkForwardValidator(
             else if (!predictedUp && actualUp) fn++
         }
 
-        if (validOos < config.minOosSamples) {
-            return unavailableResult(horizon, trainingDatasetIdentity, spec, "Insufficient valid OOS samples ($validOos)")
+        // P0: Separate engineering minimums from evidence minimums (Statistical Evidence Minimum)
+        if (validOos < config.minEvidenceSamples) {
+            return unavailableResult(horizon, trainingDatasetIdentity, spec, "Insufficient statistical evidence samples ($validOos < ${config.minEvidenceSamples}) for performance claims")
         }
 
         val oosWinRate = if (validOos > 0) correctPredictions.toDouble() / validOos else null
@@ -214,7 +247,7 @@ class WalkForwardValidator(
             falseNegatives = fn,
             brierScore = brierScore,
             calibrationError = calibrationError,
-            message = "Walk-forward OOS validation completed successfully"
+            message = "Walk-forward OOS validation completed successfully under BASELINE CONTROL"
         )
     }
 

@@ -9,10 +9,14 @@ data class TrainedHorizonPrediction(
     val status: String, // "NO_PREDICTION", "COMPLETED"
     val direction: String?, // "UP" or "DOWN"
     val probability: Double?, // mathematically produced by trained model
-    val uncertainty: Double?,
+    val uncertainty: Double?, // P0: uncertainty = null until defensible uncertainty exists
     val isTrained: Boolean
 )
 
+/**
+ * Authoritative production prediction path.
+ * BASELINE CONTROL — PRICE-MOMENTUM ONLY.
+ */
 class TrainedPredictionEngine {
     private val moshi = Moshi.Builder().build()
     private val paramsAdapter = moshi.adapter(ModelParameters::class.java)
@@ -20,7 +24,7 @@ class TrainedPredictionEngine {
 
     /**
      * Evaluates a specific horizon independently using ONLY its own trained parameters and matching provenance metadata.
-     * Returns NO_PREDICTION if stored model metadata does not match active ModelSpecification.
+     * Returns NO_PREDICTION if stored model metadata does not match active ModelSpecification or source data is insufficient.
      */
     fun evaluateHorizon(
         ticks: List<Pair<Double, Long>>,
@@ -58,12 +62,12 @@ class TrainedPredictionEngine {
             return TrainedHorizonPrediction(horizon, "NO_PREDICTION", null, null, null, false)
         }
 
-        // Enforce no-lookahead: feature extraction only uses ticks <= inferenceTimestamp
-        val historyTicks = ticks.filter { it.second <= inferenceTimestamp }
+        // Enforce no-lookahead & authoritativeness of source timestamps: filter ticks strictly <= inferenceTimestamp with valid sourceTimestamp
+        val historyTicks = ticks.filter { it.second <= inferenceTimestamp && it.second > 0L && it.first > 0.0 }
         val featureValues = mutableListOf<Double>()
 
         for (featName in spec.orderedFeatureNames) {
-            val lookback = if (featName.contains("1m")) 60000L else if (featName.contains("5m")) 300000L else 10000L
+            val lookback = 10000L
             val candidateSpec = FeatureCandidateSpec(featName, lookback)
             val featResult = pipeline.extractFeature(historyTicks, inferenceTimestamp, candidateSpec)
             if (featResult.validityStatus == "VALID" && featResult.value != null) {
@@ -73,7 +77,7 @@ class TrainedPredictionEngine {
             }
         }
 
-        // Mathematical inference from trained parameters only
+        // Mathematical inference from trained parameters only (Baseline Control: Price-Momentum Only)
         var z = params.bias
         for (i in featureValues.indices) {
             z += params.weights[i] * featureValues[i]
@@ -81,7 +85,8 @@ class TrainedPredictionEngine {
         val prob = 1.0 / (1.0 + exp(-maxOf(-30.0, minOf(30.0, z))))
 
         val direction = if (prob >= 0.5) "UP" else "DOWN"
-        val uncertainty = 1.0 - (2.0 * kotlin.math.abs(prob - 0.5))
+        // P0 requirement: uncertainty = null / unavailable until defensible uncertainty exists
+        val uncertainty: Double? = null
 
         return TrainedHorizonPrediction(
             horizon = horizon,
@@ -94,7 +99,7 @@ class TrainedPredictionEngine {
     }
 
     /**
-     * Evaluates all independent horizons.
+     * Evaluates all canonical horizons independently.
      */
     fun evaluateAllHorizons(
         ticks: List<Pair<Double, Long>>,

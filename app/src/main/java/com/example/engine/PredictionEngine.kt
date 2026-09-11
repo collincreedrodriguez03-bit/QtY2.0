@@ -1,29 +1,36 @@
 package com.example.engine
 
+import com.example.data.TrainedModelEntity
+
 data class HorizonPrediction(
     val horizon: String,
-    val status: String, // "NO_PREDICTION" until trained model exists
+    val status: String, // "NO_PREDICTION", "COMPLETED"
     val direction: String?,
     val confidence: Double?,
     val targetPrice: Double?,
-    val uncertainty: Double?,
+    val uncertainty: Double?, // P0: uncertainty = null until defensible uncertainty exists
     val isSelectiveHighWinRate: Boolean
 )
 
+/**
+ * Authoritative production prediction path wrapper/facade.
+ * BASELINE CONTROL — PRICE-MOMENTUM ONLY.
+ */
 class PredictionEngine {
-    private val featureExtractor = FeatureExtractor()
+    private val trainedPredictionEngine = TrainedPredictionEngine()
 
-    fun evaluateHorizons(ticks: List<Pair<Double, Long>>): List<HorizonPrediction> {
-        val horizons = listOf("5s", "30s", "1m", "5m", "15m")
-        // Fail closed: Until trained and validated model exists, return NO_PREDICTION rather than invented probabilities.
-        return horizons.map { horizon ->
+    fun evaluateHorizons(ticks: List<Pair<Double, Long>>, modelsMap: Map<String, TrainedModelEntity?> = emptyMap()): List<HorizonPrediction> {
+        val inferenceTimestamp = ticks.lastOrNull()?.second ?: System.currentTimeMillis()
+        val trainedPredictions = trainedPredictionEngine.evaluateAllHorizons(ticks, inferenceTimestamp, modelsMap)
+
+        return trainedPredictions.map { tp ->
             HorizonPrediction(
-                horizon = horizon,
-                status = "NO_PREDICTION",
-                direction = null,
-                confidence = null,
+                horizon = tp.horizon,
+                status = tp.status,
+                direction = tp.direction,
+                confidence = tp.probability,
                 targetPrice = null,
-                uncertainty = null,
+                uncertainty = null, // P0 requirement: no fake uncertainty derived from probability
                 isSelectiveHighWinRate = false
             )
         }

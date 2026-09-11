@@ -3,6 +3,7 @@ package com.example.engine
 import com.squareup.moshi.JsonClass
 import com.squareup.moshi.Moshi
 import kotlin.math.exp
+import kotlin.math.ln
 
 @JsonClass(generateAdapter = true)
 data class ModelParameters(
@@ -33,22 +34,27 @@ class ModelTrainer {
     }
 
     /**
-     * Converts horizon string to milliseconds. Returns null if unknown (never silently defaults to 5s).
+     * Converts canonical horizon string to milliseconds. Returns null if unknown (never silently defaults).
+     * Canonical horizons: 5s, 10s, 30s, 60s, 120s, 300s, 600s, 900s.
      */
     fun horizonToMs(horizon: String): Long? {
         return when (horizon) {
             "5s" -> 5000L
-            "15s" -> 15000L
+            "10s" -> 10000L
             "30s" -> 30000L
-            "1m" -> 60000L
-            "5m" -> 300000L
-            "15m" -> 900000L
+            "60s" -> 60000L
+            "120s" -> 120000L
+            "300s" -> 300000L
+            "600s" -> 600000L
+            "900s" -> 900000L
             else -> null
         }
     }
 
     /**
-     * Constructs timestamp-correct realized future outcome labels without lookahead using ModelSpecification.
+     * Constructs timestamp-correct realized log-return labels supporting UP, DOWN, FLAT/NO_DIRECTION.
+     * Dead-zone threshold epsilon = 0.00005 (0.005%). FLAT labels are excluded from binary training dataset.
+     * Target-resolution policy: future tick within [T+h, T+h + tolerance].
      */
     fun buildTrainingDataset(
         ticks: List<Pair<Double, Long>>,
@@ -58,21 +64,29 @@ class ModelTrainer {
         val spec = ModelSpecifications.getSpecification(horizon) ?: return emptyList()
         val dataset = mutableListOf<Pair<List<Double>, Double>>()
         val pipeline = FeatureResearchPipeline()
+        val epsilon = 0.00005
+        val maxToleranceMs = maxOf(10000L, horizonMs)
 
-        for (i in 4 until ticks.size) {
-            val currentTick = ticks[i]
+        // Ensure chronological order and filter out invalid/missing source timestamps
+        val sortedTicks = ticks.filter { it.second > 0L && it.first > 0.0 }.sortedBy { it.second }
+
+        for (i in sortedTicks.indices) {
+            val currentTick = sortedTicks[i]
             val t = currentTick.second
             val pT = currentTick.first
 
             val targetTime = t + horizonMs
-            val futureTick = ticks.firstOrNull { it.second >= targetTime } ?: continue
-            val historyTicks = ticks.filter { it.second <= t }
+            val maxTargetTime = targetTime + maxToleranceMs
+
+            // Target-resolution policy: nearest future tick strictly within valid window
+            val futureTick = sortedTicks.firstOrNull { it.second >= targetTime && it.second <= maxTargetTime } ?: continue
+            val historyTicks = sortedTicks.filter { it.second <= t }
 
             val featureValues = mutableListOf<Double>()
             var allValid = true
 
             for (featName in spec.orderedFeatureNames) {
-                val lookback = if (featName.contains("1m")) 60000L else if (featName.contains("5m")) 300000L else 10000L
+                val lookback = if (featName.contains("1m") || featName.contains("60s")) 60000L else if (featName.contains("5m") || featName.contains("300s")) 300000L else 10000L
                 val candidateSpec = FeatureCandidateSpec(featName, lookback)
                 val featResult = pipeline.extractFeature(historyTicks, t, candidateSpec)
                 if (featResult.validityStatus == "VALID" && featResult.value != null) {
@@ -85,8 +99,16 @@ class ModelTrainer {
 
             if (allValid && featureValues.size == spec.orderedFeatureNames.size) {
                 val pFuture = futureTick.first
-                val label = if (pFuture > pT) 1.0 else 0.0
-                dataset.add(Pair(featureValues, label))
+                if (pT > 0.0 && pFuture > 0.0) {
+                    val logReturn = ln(pFuture / pT)
+                    when {
+                        logReturn > epsilon -> dataset.add(Pair(featureValues, 1.0)) // UP
+                        logReturn < -epsilon -> dataset.add(Pair(featureValues, 0.0)) // DOWN
+                        else -> {
+                            // FLAT / NO_DIRECTION: excluded from binary training dataset per dead-zone policy
+                        }
+                    }
+                }
             }
         }
         return dataset
@@ -148,38 +170,40 @@ class ModelTrainer {
 
         for (epoch in 0 until epochs) {
             val dWeights = MutableList(numFeatures) { 0.0 }
-            var db = 0.0
+            var dBias = 0.0
+
             for ((features, label) in trainingData) {
                 var z = bias
-                for (j in 0 until numFeatures) {
+                for (j in features.indices) {
                     z += weights[j] * features[j]
                 }
                 val pred = 1.0 / (1.0 + exp(-maxOf(-30.0, minOf(30.0, z))))
-                val err = pred - label
-                for (j in 0 until numFeatures) {
-                    dWeights[j] += err * features[j]
+                val error = pred - label
+
+                for (j in features.indices) {
+                    dWeights[j] += error * features[j]
                 }
-                db += err
+                dBias += error
             }
-            for (j in 0 until numFeatures) {
+
+            for (j in weights.indices) {
                 weights[j] -= lr * (dWeights[j] / n)
             }
-            bias -= lr * (db / n)
+            bias -= lr * (dBias / n)
         }
 
-        val parameters = ModelParameters(weights = weights, bias = bias)
         return TrainingResult(
             horizon = horizon,
             success = true,
             sampleCount = trainingData.size,
-            parameters = parameters,
+            parameters = ModelParameters(weights, bias),
             trainingDatasetIdentity = trainingDatasetIdentity,
             featureSetVersion = spec.featureSetVersion,
             labelVersion = spec.labelVersion,
             trainingStartTime = trainingStartTime,
             trainingEndTime = trainingEndTime,
             parametersVersion = spec.parametersVersion,
-            message = "Trained successfully"
+            message = "Model trained successfully as BASELINE CONTROL — PRICE-MOMENTUM ONLY"
         )
     }
 }
